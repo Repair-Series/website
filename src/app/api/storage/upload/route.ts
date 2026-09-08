@@ -23,7 +23,9 @@ export function OPTIONS(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const caller = await requireApiCaller(req);
-    const form = await req.formData();
+    const form = (await req.formData()) as unknown as {
+      get(name: string): File | Blob | string | null;
+    };
     const meta = metaFromForm(form, caller);
     await authorizeUpload(caller, meta);
 

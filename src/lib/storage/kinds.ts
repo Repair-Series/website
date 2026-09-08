@@ -47,7 +47,11 @@ export type UploadMeta = {
   side?: string;
 };
 
-export function metaFromForm(form: FormData, caller: ApiCaller): UploadMeta {
+type FormLike = {
+  get(name: string): unknown;
+};
+
+export function metaFromForm(form: FormLike, caller: ApiCaller): UploadMeta {
   const kind = parseUploadKind(form.get("kind"));
   const ownerId = String(form.get("ownerId") || caller.uid).trim();
   return {

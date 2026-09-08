@@ -67,9 +67,10 @@ export function serializePhoneAuthError(error: unknown): Record<string, unknown>
     cause?: unknown;
   };
   const toolkit = identityToolkitFromCustomData(e.customData);
+  const toJSON = (error as { toJSON?: () => unknown }).toJSON;
   const firebaseJson =
-    error instanceof FirebaseError && typeof error.toJSON === "function"
-      ? error.toJSON()
+    error instanceof FirebaseError && typeof toJSON === "function"
+      ? toJSON.call(error)
       : undefined;
 
   return {

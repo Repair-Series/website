@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "180059659434",
+    "firebase_url": "https://repair-series-default-rtdb.firebaseio.com",
+    "project_id": "repair-series",
+    "storage_bucket": "repair-series.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:180059659434:android:5699de28e5bb95a7c404d3",
+        "android_client_info": {
+          "package_name": "com.repairseries.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPZQz0SEaQqynIfTshJjtwv94c-U6eENU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:180059659434:android:92b39b43ea557f5ec404d3",
+        "android_client_info": {
+          "package_name": "com.repairseries.technicianapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPZQz0SEaQqynIfTshJjtwv94c-U6eENU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:180059659434:android:e72792002c710661c404d3",
+        "android_client_info": {
+          "package_name": "com.vivexatech.technician"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPZQz0SEaQqynIfTshJjtwv94c-U6eENU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

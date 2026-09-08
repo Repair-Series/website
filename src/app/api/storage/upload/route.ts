@@ -1,17 +1,11 @@
 import { NextRequest } from "next/server";
 import { requireApiCaller } from "@/lib/server/auth";
 import { apiOptions, jsonWithCors, publicErrorMessage } from "@/lib/server/http";
-import {
-  IMAGE_STORAGE_PROVIDER,
-  authorizeUpload,
-  buildPublicImageKey,
-  metaFromForm,
-  optimizeImageBuffer,
-  shouldOverwriteCloudinary,
-  uploadImageToCloudinary,
-  validateImageBuffer,
-  MAX_OPTIMIZED_IMAGE_BYTES,
-} from "@/lib/storage";
+import { IMAGE_STORAGE_PROVIDER, buildPublicImageKey, shouldOverwriteCloudinary } from "@/lib/storage/keys";
+import { authorizeUpload, metaFromForm } from "@/lib/storage/kinds";
+import { optimizeImageBuffer } from "@/lib/storage/optimize-image";
+import { uploadImageToCloudinary } from "@/lib/storage/cloudinary";
+import { MAX_OPTIMIZED_IMAGE_BYTES, validateImageBuffer } from "@/lib/storage/validate";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;

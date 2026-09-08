@@ -6,10 +6,8 @@ import {
 } from "@/lib/invoice/server/auth";
 import { invoiceDocId } from "@/lib/server/finance";
 import { invoiceCorsHeaders, invoiceOptions } from "@/lib/invoice/server/cors";
-import {
-  downloadInvoicePdfFromRecord,
-  isCloudinaryUrl,
-} from "@/lib/storage";
+import { isCloudinaryUrl } from "@/lib/storage/keys";
+import { downloadInvoicePdfFromRecord } from "@/lib/storage/invoicePdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;

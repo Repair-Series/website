@@ -5,14 +5,12 @@ import { financeFromBooking } from "@/lib/server/finance";
 import {
   DOCUMENT_STORAGE_PROVIDER,
   buildInvoiceDrivePath,
-  downloadInvoicePdfFromRecord,
-  hasStoredInvoiceFile,
   invoiceAccessUrl,
   isCloudinaryUrl,
-  isGoogleDriveConfigured,
-  uploadInvoicePdfToDrive,
-  validatePdfBuffer,
-} from "@/lib/storage";
+} from "@/lib/storage/keys";
+import { isGoogleDriveConfigured, uploadInvoicePdfToDrive } from "@/lib/storage/drive";
+import { downloadInvoicePdfFromRecord, hasStoredInvoiceFile } from "@/lib/storage/invoicePdf";
+import { validatePdfBuffer } from "@/lib/storage/validate";
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { renderInvoicePdf } = require("./renderPdf") as {

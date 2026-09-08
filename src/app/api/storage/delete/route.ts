@@ -1,11 +1,8 @@
 import { NextRequest } from "next/server";
 import { requireAdminOrInternal, requireApiCaller } from "@/lib/server/auth";
 import { apiOptions, jsonWithCors, publicErrorMessage } from "@/lib/server/http";
-import {
-  cloudinaryPublicIdFromUrl,
-  destroyCloudinaryImage,
-  isInvoiceKey,
-} from "@/lib/storage";
+import { cloudinaryPublicIdFromUrl, destroyCloudinaryImage } from "@/lib/storage/cloudinary";
+import { isInvoiceKey } from "@/lib/storage/keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;

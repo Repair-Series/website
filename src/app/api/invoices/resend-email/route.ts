@@ -7,7 +7,8 @@ import {
   sendInvoiceEmail,
 } from "@/lib/invoice/server";
 import { invoiceOptions, jsonWithCors } from "@/lib/invoice/server/cors";
-import { downloadInvoicePdfFromRecord, isCloudinaryUrl } from "@/lib/storage";
+import { isCloudinaryUrl } from "@/lib/storage/keys";
+import { downloadInvoicePdfFromRecord } from "@/lib/storage/invoicePdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

@@ -31,7 +31,36 @@ function emailPdfUrl(invoice: Record<string, unknown> | null | undefined): strin
   return isCloudinaryUrl(stored) ? stored : "";
 }
 
-export async function generateAndStoreInvoice(
+async function recordInvoiceJob(
+  db: Firestore,
+  bookingId: string,
+  patch: {
+    status: "issued" | "failed";
+    lastError?: string | null;
+    googleDriveFileId?: string | null;
+  },
+) {
+  const bookingRef = db.doc(`bookings/${bookingId}`);
+  const snap = await bookingRef.get();
+  const prev = (snap.data()?.invoiceJob || {}) as Record<string, unknown>;
+  const attempts = Number(prev.attemptCount || 0) + 1;
+  await bookingRef.set(
+    {
+      invoiceJob: {
+        operationType: "generate",
+        status: patch.status,
+        attemptCount: attempts,
+        lastError: patch.status === "failed" ? String(patch.lastError || "").slice(0, 500) : null,
+        googleDriveFileId: patch.googleDriveFileId || prev.googleDriveFileId || null,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+async function generateAndStoreInvoiceInner(
   db: Firestore,
   options: {
     bookingId: string;
@@ -347,6 +376,39 @@ export async function generateAndStoreInvoice(
     pageCount: finance.invoicePageCount,
     email: emailResult,
   };
+}
+
+export async function generateAndStoreInvoice(
+  db: Firestore,
+  options: {
+    bookingId: string;
+    booking?: Record<string, unknown>;
+    force?: boolean;
+    sendEmail?: boolean;
+    secrets?: {
+      resend?: Record<string, string>;
+    };
+  },
+) {
+  const bookingId = String(options.bookingId || "").trim();
+  try {
+    const result = await generateAndStoreInvoiceInner(db, options);
+    if (bookingId) {
+      await recordInvoiceJob(db, bookingId, {
+        status: "issued",
+        googleDriveFileId: String(result.googleDriveFileId || "") || null,
+      }).catch(() => {});
+    }
+    return result;
+  } catch (err) {
+    if (bookingId) {
+      await recordInvoiceJob(db, bookingId, {
+        status: "failed",
+        lastError: String((err as Error)?.message || err),
+      }).catch(() => {});
+    }
+    throw err;
+  }
 }
 
 export { shouldGenerateInvoice };

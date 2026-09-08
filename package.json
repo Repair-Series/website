@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/server/finance/finance.test.ts src/lib/peak-hours/group-slots.test.ts src/lib/catalog/category-video.test.ts src/lib/auth/phone.test.ts src/lib/storage/keys.test.ts src/lib/storage/validate.test.ts"
+    "test": "tsx --test src/lib/server/finance/finance.test.ts src/lib/peak-hours/group-slots.test.ts src/lib/catalog/category-video.test.ts src/lib/auth/phone.test.ts src/lib/storage/keys.test.ts src/lib/storage/validate.test.ts src/lib/notifications/outbox.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

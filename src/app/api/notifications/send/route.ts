@@ -9,6 +9,7 @@ import {
 import {
   parseNotifyInput,
   sendBookingNotification,
+  type NotifyInput,
 } from "@/lib/notifications/send";
 
 export const runtime = "nodejs";
@@ -19,21 +20,22 @@ export function OPTIONS(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  let parsed: NotifyInput | null = null;
   try {
     const caller = await requireApiCaller(req);
     const raw = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const input = parseNotifyInput(raw);
+    parsed = parseNotifyInput(raw);
 
     const db = getAdminDb();
-    if (input.bookingId) {
-      const snap = await db.collection("bookings").doc(input.bookingId).get();
+    if (parsed.bookingId) {
+      const snap = await db.collection("bookings").doc(parsed.bookingId).get();
       if (!snap.exists) {
         return jsonWithCors(req, { error: "Booking not found" }, { status: 404 });
       }
       assertBookingAccess(caller, (snap.data() || {}) as Record<string, unknown>);
     } else {
       requireAdminOrInternal(caller);
-      if (!input.customerId && !input.technicianId) {
+      if (!parsed.customerId && !parsed.technicianId) {
         return jsonWithCors(
           req,
           { error: "bookingId or recipient id required" },
@@ -42,12 +44,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const result = await sendBookingNotification(input);
+    const result = await sendBookingNotification(parsed);
     return jsonWithCors(req, { ok: true, results: result.results });
   } catch (err) {
     const status = Number((err as { status?: number })?.status) || 500;
     const message = publicErrorMessage(err, "Notification failed");
-    if (status >= 500) console.error("api/notifications/send", message);
+    if (status >= 500) {
+      console.error("api/notifications/send", message);
+      if (parsed) {
+        try {
+          const { enqueueFailedNotification } = await import(
+            "@/lib/notifications/outbox"
+          );
+          await enqueueFailedNotification(parsed, message);
+        } catch {
+          /* outbox is best-effort */
+        }
+      }
+    }
     return jsonWithCors(req, { error: message }, { status });
   }
 }

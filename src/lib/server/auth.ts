@@ -24,24 +24,8 @@ function internalSecrets(): string[] {
     .filter(Boolean);
 }
 
-export function isVercelCron(req: NextRequest): boolean {
-  return Boolean(req.headers.get("x-vercel-cron"));
-}
-
-/** Server-to-server or Vercel Cron. Never accept NEXT_PUBLIC_* secrets. */
+/** Server-to-server. Never accept NEXT_PUBLIC_* secrets. */
 export function tryInternalAuth(req: NextRequest): ApiCaller | null {
-  if (isVercelCron(req)) {
-    const cronSecret = String(process.env.CRON_SECRET || "").trim();
-    if (cronSecret) {
-      const token = bearerToken(req);
-      if (token && token === cronSecret) {
-        return { uid: "cron", role: "internal" };
-      }
-      // Hobby crons may not send Authorization — allow the Vercel cron header only.
-    }
-    return { uid: "cron", role: "internal" };
-  }
-
   const token = bearerToken(req);
   if (!token) return null;
   if (internalSecrets().includes(token)) {

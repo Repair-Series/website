@@ -57,6 +57,8 @@ export type NotifyInput = {
   techBody?: string;
   audience?: string;
   force?: boolean;
+  /** When true, do not drain the fallback outbox (avoids recursion). */
+  skipOutboxDrain?: boolean;
 };
 
 function sanitizeText(raw: unknown, max: number): string {
@@ -251,5 +253,10 @@ export async function sendBookingNotification(input: NotifyInput) {
   }
 
   await markDelivered(input, results);
+  if (!input.skipOutboxDrain) {
+    void import("@/lib/notifications/outbox")
+      .then((mod) => mod.processNotificationOutbox(3))
+      .catch(() => {});
+  }
   return { ok: true, results, bookingId, customerId, technicianId, booking };
 }

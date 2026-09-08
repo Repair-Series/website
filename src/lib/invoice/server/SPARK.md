@@ -29,6 +29,8 @@ Also:
 
 - `POST /api/storage/upload` — authenticated Cloudinary image upload
 - `GET /api/invoices/file?bookingId=` — streams a private Drive PDF after ownership checks
+- `POST /api/notifications/send` — event-driven push (no cron)
+- `POST /api/notifications/process-outbox` — admin retry of failed notification sends only
 
 Optional:
 

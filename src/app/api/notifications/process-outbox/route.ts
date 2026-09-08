@@ -6,6 +6,10 @@ import { processNotificationOutbox } from "@/lib/notifications/outbox";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+/**
+ * Admin-triggered drain of failed notification sends.
+ * Not invoked by Vercel Cron. Booking events call /api/notifications/send immediately.
+ */
 export function OPTIONS(req: NextRequest) {
   return apiOptions(req);
 }

@@ -5,10 +5,6 @@ import {
   requireInvoiceCaller,
   type InvoiceAccess,
 } from "@/lib/invoice/server/auth";
-import {
-  generateAndStoreInvoice,
-  invoiceSecretsFromEnv,
-} from "@/lib/invoice/server";
 import { jsonWithCors } from "@/lib/api/cors";
 
 export async function handleGeneratePost(req: NextRequest) {
@@ -16,9 +12,9 @@ export async function handleGeneratePost(req: NextRequest) {
   let access: InvoiceAccess;
   try {
     access = await requireInvoiceCaller(req);
-    console.info("[Invoice API] Authentication status", { ok: true, role: access.role });
+    console.info("[Invoice API] Authentication result", { ok: true, role: access.role });
   } catch (err) {
-    console.info("[Invoice API] Authentication status", { ok: false });
+    console.info("[Invoice API] Authentication result", { ok: false });
     throw err;
   }
 
@@ -42,22 +38,24 @@ export async function handleGeneratePost(req: NextRequest) {
   const booking = (bookingSnap.data() || {}) as Record<string, unknown>;
   try {
     await assertBookingAccess(access, booking);
-    console.info("[Invoice API] Authorization status", { ok: true, role: access.role });
+    console.info("[Invoice API] Authorization result", { ok: true, role: access.role });
   } catch (err) {
-    console.info("[Invoice API] Authorization status", { ok: false, role: access.role });
+    console.info("[Invoice API] Authorization result", { ok: false, role: access.role });
     throw err;
   }
 
-  const force = access.role === "admin" ? Boolean(body.force) : false;
-  const sendEmail = access.role === "admin" ? body.sendEmail !== false : true;
-
+  console.info("[Invoice API] Invoice generation started", { bookingId });
+  const { generateAndStoreInvoice, invoiceSecretsFromEnv } = await import(
+    "@/lib/invoice/server"
+  );
   const result = await generateAndStoreInvoice(db, {
     bookingId,
     booking,
-    force,
-    sendEmail,
+    force: access.role === "admin" ? Boolean(body.force) : false,
+    sendEmail: access.role === "admin" ? body.sendEmail !== false : true,
     secrets: invoiceSecretsFromEnv(),
   });
+  console.info("[Invoice API] Invoice generation completed", { bookingId });
 
-  return jsonWithCors(req, { ok: true, ...result });
+  return jsonWithCors(req, { ok: true, success: true, ...result });
 }

@@ -33,7 +33,11 @@ export async function POST(req: NextRequest) {
 
 export function GET(req: NextRequest) {
   return NextResponse.json(
-    { error: "POST method required" },
+    {
+      success: false,
+      code: "METHOD_NOT_ALLOWED",
+      error: "This URL only accepts POST JSON with bookingId. Opening it in a browser is GET.",
+    },
     { status: 405, headers: { ...apiCorsHeaders(req), Allow: "POST, OPTIONS" } },
   );
 }

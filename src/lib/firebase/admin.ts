@@ -21,8 +21,11 @@ function getAdminApp(): App {
   if (getApps().length) return getApps()[0]!;
   const sa = parseServiceAccount();
   if (!sa) {
-    throw new Error(
-      "Missing FIREBASE_SERVICE_ACCOUNT_JSON (paste service account JSON or base64 on Vercel)",
+    throw Object.assign(
+      new Error(
+        "Missing FIREBASE_SERVICE_ACCOUNT_JSON (paste service account JSON or base64 on Vercel)",
+      ),
+      { status: 503 },
     );
   }
   return initializeApp({

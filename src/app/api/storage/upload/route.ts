@@ -20,8 +20,11 @@ function methodNotAllowed(req: NextRequest) {
   console.info("[Storage API] Origin:", req.headers.get("origin") || "(none)");
   return NextResponse.json(
     {
+      success: false,
+      code: "METHOD_NOT_ALLOWED",
       route: "src/app/api/storage/upload/route.ts",
-      error: "POST method required",
+      error:
+        "This URL only accepts POST multipart/form-data with fields file and kind. Opening it in a browser is GET, not an upload.",
     },
     {
       status: 405,

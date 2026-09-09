@@ -15,12 +15,10 @@ type FileLike = {
 };
 
 function isFileLike(value: unknown): value is FileLike {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof (value as FileLike).arrayBuffer === "function" &&
-      Number((value as FileLike).size) > 0,
-  );
+  if (!value || typeof value === "string") return false;
+  if (typeof value !== "object") return false;
+  const file = value as FileLike;
+  return typeof file.arrayBuffer === "function";
 }
 
 function corsHeaders(req: NextRequest): Record<string, string> {
@@ -55,6 +53,8 @@ export async function handleUploadPost(req: NextRequest) {
   let kind = "";
   try {
     console.info("[Storage Upload] Cloudinary configuration status", envStatus());
+    console.info("[Storage Upload] Method:", req.method);
+    console.info("[Storage Upload] Content-Type:", req.headers.get("content-type") || "(none)");
 
     if (!isCloudinaryConfigured()) {
       throw Object.assign(new Error("Cloudinary is not configured on the server"), {
@@ -62,29 +62,50 @@ export async function handleUploadPost(req: NextRequest) {
       });
     }
 
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      console.error("[Storage Upload] Upload failed", "Invalid multipart request");
+      return json(req, { error: "Invalid multipart request" }, 400);
+    }
+
+    const kindRaw = String(form.get("kind") || "").trim();
+    const fileField = form.get("file");
+    const fileOk = isFileLike(fileField);
+    console.info("[Storage Upload] File received:", fileOk);
+    console.info("[Storage Upload] Kind received:", kindRaw || "(empty)");
+
     const caller = await requireApiCaller(req);
     console.info("[Storage Upload] Authentication result", { role: caller.role });
 
-    const form = (await req.formData()) as unknown as {
-      get(name: string): File | Blob | string | null;
-    };
+    if (!kindRaw) {
+      return json(req, { error: "Missing kind" }, 400);
+    }
     const meta = metaFromForm(form, caller);
     kind = meta.kind;
     console.info("[Storage Upload] Upload purpose", { kind: meta.kind });
     await authorizeUpload(caller, meta);
 
-    const file = form.get("file");
-    if (!isFileLike(file)) {
-      return json(req, { error: "Missing image file" }, 400);
+    if (typeof fileField === "string") {
+      return json(req, { error: "Missing file" }, 400);
     }
+    if (!fileOk) {
+      return json(req, { error: "Missing file" }, 400);
+    }
+    const file = fileField;
 
     console.info("[Storage Upload] File received", {
       bytes: file.size,
       claimedType: String(file.type || ""),
       name: String(file.name || ""),
     });
+    console.info("[Storage Upload] Validation successful");
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (!buffer.length) {
+      return json(req, { error: "Missing file" }, 400);
+    }
     const { contentType: sniffedType } = validateImageBuffer(buffer, file.type);
     const optimized = await optimizeImageBuffer(buffer, sniffedType);
     if (optimized.buffer.length > MAX_OPTIMIZED_IMAGE_BYTES) {

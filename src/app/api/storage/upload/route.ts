@@ -32,20 +32,26 @@ export function OPTIONS(req: NextRequest) {
   return new NextResponse(null, { status: 204, headers: corsHeaders(req) });
 }
 
-/** Lightweight probe: if this JSON is not returned, production is not running this file. */
 export function GET(req: NextRequest) {
   return NextResponse.json(
     {
       route: "src/app/api/storage/upload/route.ts",
-      error: "Use POST with multipart file + kind",
-      env: configPresence(),
+      error: "POST method required",
     },
-    { status: 405, headers: corsHeaders(req) },
+    {
+      status: 405,
+      headers: {
+        ...corsHeaders(req),
+        Allow: "POST, OPTIONS",
+      },
+    },
   );
 }
 
 export async function POST(req: NextRequest) {
   console.info("[Storage Upload] Request received");
+  console.info("[Storage Upload] Method:", req.method);
+  console.info("[Storage Upload] Content-Type:", req.headers.get("content-type") || "(none)");
   try {
     const { handleUploadPost } = await import("./post");
     return await handleUploadPost(req);

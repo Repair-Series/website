@@ -32,9 +32,12 @@ const KIND_ALIASES: Record<string, UploadKind> = {
 
 export function parseUploadKind(value: unknown): UploadKind {
   const raw = String(value || "").trim();
+  if (!raw) {
+    throw Object.assign(new Error("Missing kind"), { status: 400 });
+  }
   const kind = (KIND_ALIASES[raw] || raw) as UploadKind;
   if (!UPLOAD_KINDS.includes(kind)) {
-    throw Object.assign(new Error("Unsupported upload type"), { status: 400 });
+    throw Object.assign(new Error("Invalid kind"), { status: 400 });
   }
   return kind;
 }

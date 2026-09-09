@@ -1,149 +1,64 @@
-import { NextRequest } from "next/server";
-import { requireApiCaller } from "@/lib/server/auth";
-import { apiOptions, jsonWithCors, publicErrorMessage } from "@/lib/server/http";
-import { isCloudinaryConfigured } from "@/lib/storage/cloudinary";
-import { uploadImageToCloudinary } from "@/lib/storage/cloudinary";
-import { IMAGE_STORAGE_PROVIDER, buildPublicImageKey, shouldOverwriteCloudinary } from "@/lib/storage/keys";
-import { authorizeUpload, metaFromForm } from "@/lib/storage/kinds";
-import { optimizeImageBuffer } from "@/lib/storage/optimize-image";
-import { MAX_OPTIMIZED_IMAGE_BYTES, validateImageBuffer } from "@/lib/storage/validate";
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-type FileLike = {
-  arrayBuffer: () => Promise<ArrayBuffer>;
-  size: number;
-  type?: string;
-  name?: string;
-};
-
-function isFileLike(value: unknown): value is FileLike {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof (value as FileLike).arrayBuffer === "function" &&
-      Number((value as FileLike).size) > 0,
-  );
+function corsHeaders(req: NextRequest): Record<string, string> {
+  const origin = req.headers.get("origin") || "";
+  const requested = String(req.headers.get("access-control-request-headers") || "").trim();
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": requested
+      ? `Authorization, Content-Type, Accept, Origin, X-Requested-With, ${requested}`
+      : "Authorization, Content-Type, Accept, Origin, X-Requested-With",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin, Access-Control-Request-Headers",
+  };
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
 }
 
-function cloudinaryConfigPresence() {
+function configPresence() {
   return {
-    cloudName: Boolean(
-      String(process.env.CLOUDINARY_CLOUD_NAME || process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "").trim(),
-    ),
+    cloudName: Boolean(String(process.env.CLOUDINARY_CLOUD_NAME || "").trim()),
     apiKey: Boolean(String(process.env.CLOUDINARY_API_KEY || "").trim()),
     apiSecret: Boolean(String(process.env.CLOUDINARY_API_SECRET || "").trim()),
-    uploadPreset: Boolean(String(process.env.CLOUDINARY_UPLOAD_PRESET || "").trim()),
+    firebaseAdmin: Boolean(String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim()),
   };
 }
 
 export function OPTIONS(req: NextRequest) {
-  return apiOptions(req);
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req) });
 }
 
+/** Lightweight probe: if this JSON is not returned, production is not running this file. */
 export function GET(req: NextRequest) {
-  return jsonWithCors(
-    req,
-    { error: "Use POST with multipart file + kind" },
-    { status: 405 },
+  return NextResponse.json(
+    {
+      route: "src/app/api/storage/upload/route.ts",
+      error: "Use POST with multipart file + kind",
+      env: configPresence(),
+    },
+    { status: 405, headers: corsHeaders(req) },
   );
 }
 
 export async function POST(req: NextRequest) {
-  let kind = "";
+  console.info("[Storage Upload] Request received");
   try {
-    console.info("[storage/upload] request", {
-      cloudinary: cloudinaryConfigPresence(),
-    });
-    if (!isCloudinaryConfigured()) {
-      throw Object.assign(new Error("Cloudinary is not configured on the server"), {
-        status: 503,
-      });
-    }
-
-    const caller = await requireApiCaller(req);
-    const form = (await req.formData()) as unknown as {
-      get(name: string): File | Blob | string | null;
-    };
-    const meta = metaFromForm(form, caller);
-    kind = meta.kind;
-    await authorizeUpload(caller, meta);
-
-    const file = form.get("file");
-    if (!isFileLike(file)) {
-      return jsonWithCors(req, { error: "Missing image file" }, { status: 400 });
-    }
-
-    console.info("[storage/upload] file", {
-      kind: meta.kind,
-      role: caller.role,
-      bytes: file.size,
-      claimedType: String(file.type || ""),
-      name: String(file.name || ""),
-    });
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const { contentType: sniffedType } = validateImageBuffer(buffer, file.type);
-    const optimized = await optimizeImageBuffer(buffer, sniffedType);
-    if (optimized.buffer.length > MAX_OPTIMIZED_IMAGE_BYTES) {
-      return jsonWithCors(
-        req,
-        { error: "Image is still too large after compression" },
-        { status: 413 },
-      );
-    }
-    const contentType = optimized.contentType;
-
-    const ownerId =
-      meta.kind === "profile-user" ||
-      meta.kind === "profile-partner" ||
-      meta.kind === "kyc"
-        ? caller.role === "admin"
-          ? meta.ownerId || caller.uid
-          : caller.uid
-        : meta.ownerId;
-
-    const publicId = buildPublicImageKey({
-      ...meta,
-      ownerId,
-      contentType,
-    });
-
-    const uploaded = await uploadImageToCloudinary({
-      body: optimized.buffer,
-      contentType,
-      publicId,
-      overwrite: shouldOverwriteCloudinary(meta.kind),
-    });
-
-    console.info("[storage/upload] ok", {
-      kind: meta.kind,
-      publicId: uploaded.publicId,
-      bytes: uploaded.bytes,
-    });
-
-    return jsonWithCors(req, {
-      ok: true,
-      success: true,
-      storageProvider: IMAGE_STORAGE_PROVIDER,
-      fileKey: uploaded.publicId,
-      publicId: uploaded.publicId,
-      url: uploaded.url,
-      resourceType: "image",
-      contentType,
-      bytes: uploaded.bytes,
-      uploadedAt: new Date().toISOString(),
-    });
+    const { handleUploadPost } = await import("./post");
+    return await handleUploadPost(req);
   } catch (err) {
-    const status = Number((err as { status?: number })?.status) || 500;
-    const message = publicErrorMessage(err, "Image upload failed");
-    console.error("[storage/upload] fail", {
-      kind,
-      status,
-      message: String((err as Error)?.message || err),
-      cloudinary: cloudinaryConfigPresence(),
+    const message = String((err as Error)?.message || err);
+    console.error("[Storage Upload] Upload failed", {
+      message,
+      stack: (err as Error)?.stack,
+      env: configPresence(),
     });
-    return jsonWithCors(req, { error: message }, { status });
+    return NextResponse.json(
+      { error: "Image upload failed", detail: message },
+      { status: 500, headers: corsHeaders(req) },
+    );
   }
 }

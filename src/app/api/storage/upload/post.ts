@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { jsonWithCors } from "@/lib/api/cors";
 import { requireApiCaller } from "@/lib/server/auth";
 import { publicErrorMessage } from "@/lib/server/http";
 import { isCloudinaryConfigured, uploadImageToCloudinary } from "@/lib/storage/cloudinary";
@@ -21,23 +22,8 @@ function isFileLike(value: unknown): value is FileLike {
   return typeof file.arrayBuffer === "function";
 }
 
-function corsHeaders(req: NextRequest): Record<string, string> {
-  const origin = req.headers.get("origin") || "";
-  const requested = String(req.headers.get("access-control-request-headers") || "").trim();
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": requested
-      ? `Authorization, Content-Type, Accept, Origin, X-Requested-With, ${requested}`
-      : "Authorization, Content-Type, Accept, Origin, X-Requested-With",
-    "Access-Control-Max-Age": "86400",
-    Vary: "Origin, Access-Control-Request-Headers",
-  };
-  if (origin) headers["Access-Control-Allow-Origin"] = origin;
-  return headers;
-}
-
 function json(req: NextRequest, body: unknown, status: number) {
-  return NextResponse.json(body, { status, headers: corsHeaders(req) });
+  return jsonWithCors(req, body, { status });
 }
 
 function envStatus() {
@@ -62,6 +48,11 @@ export async function handleUploadPost(req: NextRequest) {
       });
     }
 
+    const requestContentType = String(req.headers.get("content-type") || "").toLowerCase();
+    if (requestContentType && !requestContentType.includes("multipart/form-data")) {
+      return json(req, { error: "Use multipart/form-data with file and kind" }, 415);
+    }
+
     let form: FormData;
     try {
       form = await req.formData();
@@ -73,6 +64,8 @@ export async function handleUploadPost(req: NextRequest) {
     const kindRaw = String(form.get("kind") || "").trim();
     const fileField = form.get("file");
     const fileOk = isFileLike(fileField);
+    console.info("[Storage API] File present:", fileOk);
+    console.info("[Storage API] Kind present:", Boolean(kindRaw));
     console.info("[Storage Upload] File received:", fileOk);
     console.info("[Storage Upload] Kind received:", kindRaw || "(empty)");
 

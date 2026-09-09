@@ -1,23 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { apiCorsHeaders, apiOptions, jsonWithCors } from "@/lib/api/cors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-
-function corsHeaders(req: NextRequest): Record<string, string> {
-  const origin = req.headers.get("origin") || "";
-  const requested = String(req.headers.get("access-control-request-headers") || "").trim();
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": requested
-      ? `Authorization, Content-Type, Accept, Origin, X-Requested-With, ${requested}`
-      : "Authorization, Content-Type, Accept, Origin, X-Requested-With",
-    "Access-Control-Max-Age": "86400",
-    Vary: "Origin, Access-Control-Request-Headers",
-  };
-  if (origin) headers["Access-Control-Allow-Origin"] = origin;
-  return headers;
-}
 
 function configPresence() {
   return {
@@ -28,11 +14,10 @@ function configPresence() {
   };
 }
 
-export function OPTIONS(req: NextRequest) {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(req) });
-}
-
-export function GET(req: NextRequest) {
+function methodNotAllowed(req: NextRequest) {
+  console.info("[Storage API] Request received");
+  console.info("[Storage API] Method:", req.method);
+  console.info("[Storage API] Origin:", req.headers.get("origin") || "(none)");
   return NextResponse.json(
     {
       route: "src/app/api/storage/upload/route.ts",
@@ -41,30 +26,62 @@ export function GET(req: NextRequest) {
     {
       status: 405,
       headers: {
-        ...corsHeaders(req),
+        ...apiCorsHeaders(req),
         Allow: "POST, OPTIONS",
       },
     },
   );
 }
 
+export function OPTIONS(req: NextRequest) {
+  console.info("[Storage API] OPTIONS preflight received", {
+    origin: req.headers.get("origin") || "",
+  });
+  return apiOptions(req);
+}
+
+export function GET(req: NextRequest) {
+  return methodNotAllowed(req);
+}
+
+export function HEAD(req: NextRequest) {
+  return new NextResponse(null, {
+    status: 405,
+    headers: { ...apiCorsHeaders(req), Allow: "POST, OPTIONS" },
+  });
+}
+
+export function PUT(req: NextRequest) {
+  return methodNotAllowed(req);
+}
+
+export function PATCH(req: NextRequest) {
+  return methodNotAllowed(req);
+}
+
+export function DELETE(req: NextRequest) {
+  return methodNotAllowed(req);
+}
+
 export async function POST(req: NextRequest) {
-  console.info("[Storage Upload] Request received");
-  console.info("[Storage Upload] Method:", req.method);
-  console.info("[Storage Upload] Content-Type:", req.headers.get("content-type") || "(none)");
+  console.info("[Storage API] Request received");
+  console.info("[Storage API] Method:", req.method);
+  console.info("[Storage API] Origin:", req.headers.get("origin") || "(none)");
+  console.info("[Storage API] Content type:", req.headers.get("content-type") || "(none)");
   try {
     const { handleUploadPost } = await import("./post");
     return await handleUploadPost(req);
   } catch (err) {
     const message = String((err as Error)?.message || err);
-    console.error("[Storage Upload] Upload failed", {
+    console.error("[Storage API] Upload failed", {
       message,
       stack: (err as Error)?.stack,
       env: configPresence(),
     });
-    return NextResponse.json(
+    return jsonWithCors(
+      req,
       { error: "Image upload failed", detail: message },
-      { status: 500, headers: corsHeaders(req) },
+      { status: 500 },
     );
   }
 }

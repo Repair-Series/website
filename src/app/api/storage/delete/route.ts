@@ -11,6 +11,10 @@ export function OPTIONS(req: NextRequest) {
   return apiOptions(req);
 }
 
+export function GET(req: NextRequest) {
+  return jsonWithCors(req, { error: "POST method required" }, { status: 405 });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const caller = await requireApiCaller(req);

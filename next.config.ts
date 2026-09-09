@@ -17,6 +17,7 @@ const nextConfig: NextConfig = {
     "qrcode",
     "form-data",
     "googleapis",
+    "sharp",
   ],
   images: {
     remotePatterns: [

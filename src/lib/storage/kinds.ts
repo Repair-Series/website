@@ -23,8 +23,16 @@ export const UPLOAD_KINDS = [
 
 export type UploadKind = (typeof UPLOAD_KINDS)[number];
 
+const KIND_ALIASES: Record<string, UploadKind> = {
+  "customer-profile": "profile-user",
+  "user-profile": "profile-user",
+  "partner-profile": "profile-partner",
+  "technician-profile": "profile-partner",
+};
+
 export function parseUploadKind(value: unknown): UploadKind {
-  const kind = String(value || "").trim() as UploadKind;
+  const raw = String(value || "").trim();
+  const kind = (KIND_ALIASES[raw] || raw) as UploadKind;
   if (!UPLOAD_KINDS.includes(kind)) {
     throw Object.assign(new Error("Unsupported upload type"), { status: 400 });
   }

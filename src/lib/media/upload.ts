@@ -42,10 +42,11 @@ export type UploadedMedia = {
 };
 
 function websiteOrigin(): string {
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin.replace(/\/$/, "");
-  }
-  return String(process.env.NEXT_PUBLIC_SITE_URL || "").trim().replace(/\/$/, "");
+  const raw =
+    typeof window !== "undefined" && window.location?.origin
+      ? window.location.origin
+      : String(process.env.NEXT_PUBLIC_SITE_URL || "");
+  return raw.trim().replace(/\/$/, "").replace(/\/api$/i, "");
 }
 
 export async function uploadImage(

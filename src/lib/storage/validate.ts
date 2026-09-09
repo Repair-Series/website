@@ -35,14 +35,14 @@ export function validateImageBuffer(
   }
   if (buffer.length > MAX_IMAGE_BYTES) {
     throw Object.assign(new Error("Image must be 12 MB or smaller"), {
-      status: 400,
+      status: 413,
     });
   }
   const sniffed = sniffImageType(buffer);
   if (!sniffed) {
     throw Object.assign(
       new Error("Use a JPEG, PNG, or WebP image"),
-      { status: 400 },
+      { status: 415 },
     );
   }
   const claimed = String(claimedType || "").toLowerCase();
@@ -52,7 +52,7 @@ export function validateImageBuffer(
     !IMAGE_TYPES.has(claimed) &&
     claimed !== "image/jpg"
   ) {
-    throw Object.assign(new Error("Unsupported image type"), { status: 400 });
+    throw Object.assign(new Error("Unsupported image type"), { status: 415 });
   }
   return { contentType: sniffed };
 }

@@ -114,6 +114,11 @@ export async function uploadImageToCloudinary(options: {
     bytes?: number;
   };
   if (!response.ok) {
+    console.error("[cloudinary] upload failed", {
+      status: response.status,
+      message: String(payload?.error?.message || ""),
+      publicId,
+    });
     throw Object.assign(
       new Error(payload?.error?.message || `Cloudinary upload failed (${response.status})`),
       { status: 502 },
@@ -121,6 +126,7 @@ export async function uploadImageToCloudinary(options: {
   }
   const url = String(payload.secure_url || payload.url || "").trim();
   if (!url) throw new Error("Cloudinary upload returned no URL");
+  console.info("[cloudinary] upload ok", { publicId: payload.public_id || publicId, bytes: payload.bytes });
   return {
     publicId: String(payload.public_id || publicId),
     url,

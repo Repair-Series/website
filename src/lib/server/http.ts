@@ -14,9 +14,9 @@ export function applyCorsHeaders(req: NextRequest, res: NextResponse) {
 export function publicErrorMessage(err: unknown, fallback: string): string {
   const status = Number((err as { status?: number })?.status) || 0;
   const message = String((err as Error)?.message || fallback);
-  if (status >= 400 && status < 500) return message;
+  if (status >= 400 && status !== 500) return message;
   if (
-    /sign in|not allowed|unauthorized|invalid|missing|not found|pending|already/i.test(
+    /sign in|not allowed|unauthorized|invalid|missing|not found|pending|already|cloudinary|configured/i.test(
       message,
     )
   ) {

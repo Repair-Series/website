@@ -28,15 +28,21 @@ function getAdminApp(): App {
       { status: 503 },
     );
   }
-  return initializeApp({
-    credential: cert(sa as Parameters<typeof cert>[0]),
-    projectId:
-      String(sa.project_id || process.env.FIREBASE_PROJECT_ID || "repair-series"),
-    storageBucket:
-      process.env.FIREBASE_STORAGE_BUCKET ||
-      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-      undefined,
-  });
+  try {
+    return initializeApp({
+      credential: cert(sa as Parameters<typeof cert>[0]),
+      projectId:
+        String(sa.project_id || process.env.FIREBASE_PROJECT_ID || "repair-series"),
+      storageBucket:
+        process.env.FIREBASE_STORAGE_BUCKET ||
+        process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+        undefined,
+    });
+  } catch {
+    throw Object.assign(new Error("Invalid FIREBASE_SERVICE_ACCOUNT_JSON"), {
+      status: 503,
+    });
+  }
 }
 
 export function getAdminDb(): Firestore {

@@ -121,14 +121,14 @@ export async function handleUploadPost(req: NextRequest) {
       contentType,
     });
 
-    console.info("[Storage Upload] Upload started", { publicId });
+    console.info("[Storage API] Cloudinary upload started", { publicId });
     const uploaded = await uploadImageToCloudinary({
       body: optimized.buffer,
       contentType,
       publicId,
       overwrite: shouldOverwriteCloudinary(meta.kind),
     });
-    console.info("[Storage Upload] Upload successful", {
+    console.info("[Storage API] Cloudinary upload completed", {
       publicId: uploaded.publicId,
       bytes: uploaded.bytes,
     });
@@ -159,6 +159,14 @@ export async function handleUploadPost(req: NextRequest) {
       stack: (err as Error)?.stack,
       env: envStatus(),
     });
-    return json(req, { error: message }, status);
+    return json(
+      req,
+      {
+        error: message,
+        detail: String((err as Error)?.message || err),
+        env: envStatus(),
+      },
+      status,
+    );
   }
 }

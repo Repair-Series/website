@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     });
     return jsonWithCors(
       req,
-      { error: "Image upload failed", detail: message },
+      { error: "Image upload failed", detail: message, env: configPresence() },
       { status: 500 },
     );
   }

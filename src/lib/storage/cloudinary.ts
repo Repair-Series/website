@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import NodeFormData from "form-data";
 
 function requireCloudName(): string {
   const name = String(
@@ -30,10 +31,16 @@ function sign(params: Record<string, string>, apiSecret: string): string {
   return crypto.createHash("sha1").update(`${toSign}${apiSecret}`).digest("hex");
 }
 
+function fileExtension(contentType: string): string {
+  if (contentType.includes("png")) return "png";
+  if (contentType.includes("webp")) return "webp";
+  return "jpg";
+}
+
 export function isCloudinaryConfigured(): boolean {
   try {
     requireCloudName();
-    return Boolean(signedCredentials() || process.env.CLOUDINARY_UPLOAD_PRESET);
+    return Boolean(signedCredentials());
   } catch {
     return false;
   }
@@ -58,53 +65,49 @@ export async function uploadImageToCloudinary(options: {
 }): Promise<{ publicId: string; url: string; bytes: number; contentType: string }> {
   const cloudName = requireCloudName();
   const signed = signedCredentials();
+  if (!signed) {
+    throw Object.assign(
+      new Error("Set CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET on the website server"),
+      { status: 503 },
+    );
+  }
   const publicId = String(options.publicId || "")
     .replace(/^\/+/, "")
     .replace(/\.[a-z0-9]+$/i, "");
   if (!publicId) {
     throw Object.assign(new Error("Missing Cloudinary public_id"), { status: 400 });
   }
-
-  const timestamp = Math.floor(Date.now() / 1000);
-  const ext = options.contentType.includes("png")
-    ? "png"
-    : options.contentType.includes("webp")
-      ? "webp"
-      : "jpg";
-  const form = new FormData();
-  form.append(
-    "file",
-    new Blob([new Uint8Array(options.body)], { type: options.contentType || "image/webp" }),
-    options.fileName || `upload.${ext}`,
-  );
-
-  if (signed) {
-    const params: Record<string, string> = {
-      public_id: publicId,
-      timestamp: String(timestamp),
-    };
-    if (options.overwrite) params.overwrite = "true";
-    const signature = sign(params, signed.apiSecret);
-    form.append("api_key", signed.apiKey);
-    form.append("timestamp", String(timestamp));
-    form.append("signature", signature);
-    form.append("public_id", publicId);
-    if (options.overwrite) form.append("overwrite", "true");
-  } else {
-    const preset = String(process.env.CLOUDINARY_UPLOAD_PRESET || "").trim();
-    if (!preset) {
-      throw Object.assign(
-        new Error("Set CLOUDINARY_API_KEY+CLOUDINARY_API_SECRET for image uploads"),
-        { status: 503 },
-      );
-    }
-    form.append("upload_preset", preset);
-    form.append("public_id", publicId);
+  if (!options.body?.length) {
+    throw Object.assign(new Error("Missing file"), { status: 400 });
   }
 
+  const timestamp = Math.floor(Date.now() / 1000);
+  const params: Record<string, string> = {
+    public_id: publicId,
+    timestamp: String(timestamp),
+  };
+  if (options.overwrite) params.overwrite = "true";
+
+  const form = new NodeFormData();
+  form.append("file", options.body, {
+    filename: options.fileName || `upload.${fileExtension(options.contentType)}`,
+    contentType: options.contentType || "image/jpeg",
+    knownLength: options.body.length,
+  });
+  form.append("api_key", signed.apiKey);
+  form.append("timestamp", String(timestamp));
+  form.append("signature", sign(params, signed.apiSecret));
+  form.append("public_id", publicId);
+  if (options.overwrite) form.append("overwrite", "true");
+
+  console.info("[Storage API] Cloudinary upload started", { publicId, bytes: options.body.length });
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-    { method: "POST", body: form },
+    {
+      method: "POST",
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    },
   );
   const payload = (await response.json().catch(() => ({}))) as {
     error?: { message?: string };
@@ -114,19 +117,18 @@ export async function uploadImageToCloudinary(options: {
     bytes?: number;
   };
   if (!response.ok) {
-    console.error("[cloudinary] upload failed", {
-      status: response.status,
-      message: String(payload?.error?.message || ""),
-      publicId,
-    });
-    throw Object.assign(
-      new Error(payload?.error?.message || `Cloudinary upload failed (${response.status})`),
-      { status: 502 },
-    );
+    const message = String(payload?.error?.message || `Cloudinary upload failed (${response.status})`);
+    console.error("[cloudinary] upload failed", { status: response.status, message, publicId });
+    throw Object.assign(new Error(message), { status: 502 });
   }
   const url = String(payload.secure_url || payload.url || "").trim();
-  if (!url) throw new Error("Cloudinary upload returned no URL");
-  console.info("[cloudinary] upload ok", { publicId: payload.public_id || publicId, bytes: payload.bytes });
+  if (!url) {
+    throw Object.assign(new Error("Cloudinary upload returned no URL"), { status: 502 });
+  }
+  console.info("[Storage API] Cloudinary upload completed", {
+    publicId: payload.public_id || publicId,
+    bytes: payload.bytes,
+  });
   return {
     publicId: String(payload.public_id || publicId),
     url,
@@ -147,19 +149,26 @@ export async function destroyCloudinaryImage(publicId: string): Promise<void> {
   }
   const timestamp = Math.floor(Date.now() / 1000);
   const params = { public_id: id, timestamp: String(timestamp) };
-  const form = new FormData();
+  const form = new NodeFormData();
   form.append("public_id", id);
   form.append("timestamp", String(timestamp));
   form.append("api_key", signed.apiKey);
   form.append("signature", sign(params, signed.apiSecret));
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
-    { method: "POST", body: form },
+    {
+      method: "POST",
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    },
   );
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as {
       error?: { message?: string };
     };
-    throw new Error(payload?.error?.message || `Cloudinary delete failed (${response.status})`);
+    throw Object.assign(
+      new Error(payload?.error?.message || `Cloudinary delete failed (${response.status})`),
+      { status: 502 },
+    );
   }
 }

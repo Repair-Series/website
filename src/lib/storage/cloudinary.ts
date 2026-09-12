@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import NodeFormData from "form-data";
 
 function requireCloudName(): string {
   const name = String(
@@ -29,16 +28,6 @@ function sign(params: Record<string, string>, apiSecret: string): string {
     .map((key) => `${key}=${params[key]}`)
     .join("&");
   return crypto.createHash("sha1").update(`${toSign}${apiSecret}`).digest("hex");
-}
-
-function fileExtension(contentType: string): string {
-  if (contentType.includes("png")) return "png";
-  if (contentType.includes("webp")) return "webp";
-  return "jpg";
-}
-
-function formBody(form: NodeFormData): Uint8Array {
-  return new Uint8Array(form.getBuffer());
 }
 
 export function isCloudinaryConfigured(): boolean {
@@ -92,26 +81,24 @@ export async function uploadImageToCloudinary(options: {
   };
   if (options.overwrite) params.overwrite = "true";
 
-  const form = new NodeFormData();
-  form.append("file", options.body, {
-    filename: options.fileName || `upload.${fileExtension(options.contentType)}`,
-    contentType: options.contentType || "image/jpeg",
-    knownLength: options.body.length,
-  });
+  const form = new FormData();
+  form.append(
+    "file",
+    `data:${options.contentType || "image/jpeg"};base64,${options.body.toString("base64")}`,
+  );
   form.append("api_key", signed.apiKey);
   form.append("timestamp", String(timestamp));
   form.append("signature", sign(params, signed.apiSecret));
   form.append("public_id", publicId);
   if (options.overwrite) form.append("overwrite", "true");
 
-  console.info("[Storage API] Cloudinary upload started", { publicId, bytes: options.body.length });
+  console.info("[Storage API] Cloudinary upload started", {
+    publicId,
+    bytes: options.body.length,
+  });
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-    {
-      method: "POST",
-      headers: form.getHeaders(),
-      body: formBody(form),
-    },
+    { method: "POST", body: form },
   );
   const payload = (await response.json().catch(() => ({}))) as {
     error?: { message?: string };
@@ -121,7 +108,9 @@ export async function uploadImageToCloudinary(options: {
     bytes?: number;
   };
   if (!response.ok) {
-    const message = String(payload?.error?.message || `Cloudinary upload failed (${response.status})`);
+    const message = String(
+      payload?.error?.message || `Cloudinary upload failed (${response.status})`,
+    );
     console.error("[cloudinary] upload failed", { status: response.status, message, publicId });
     throw Object.assign(new Error(message), { status: 502 });
   }
@@ -153,18 +142,14 @@ export async function destroyCloudinaryImage(publicId: string): Promise<void> {
   }
   const timestamp = Math.floor(Date.now() / 1000);
   const params = { public_id: id, timestamp: String(timestamp) };
-  const form = new NodeFormData();
+  const form = new FormData();
   form.append("public_id", id);
   form.append("timestamp", String(timestamp));
   form.append("api_key", signed.apiKey);
   form.append("signature", sign(params, signed.apiSecret));
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
-    {
-      method: "POST",
-      headers: form.getHeaders(),
-      body: formBody(form),
-    },
+    { method: "POST", body: form },
   );
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as {

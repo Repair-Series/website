@@ -26,6 +26,16 @@ function json(req: NextRequest, body: unknown, status: number) {
   return jsonWithCors(req, body, { status });
 }
 
+type MultipartFields = { get(name: string): unknown };
+
+function asMultipartFields(value: unknown): MultipartFields {
+  const form = value as { get?: (name: string) => unknown };
+  if (typeof form.get !== "function") {
+    throw Object.assign(new Error("Invalid multipart request"), { status: 400 });
+  }
+  return { get: (name) => form.get?.(name) };
+}
+
 function envStatus() {
   return {
     cloudName: Boolean(String(process.env.CLOUDINARY_CLOUD_NAME || "").trim()),
@@ -53,9 +63,9 @@ export async function handleUploadPost(req: NextRequest) {
       return json(req, { error: "Use multipart/form-data with file and kind" }, 415);
     }
 
-    let form: FormData;
+    let form: MultipartFields;
     try {
-      form = await req.formData();
+      form = asMultipartFields(await req.formData());
     } catch {
       console.error("[Storage Upload] Upload failed", "Invalid multipart request");
       return json(req, { error: "Invalid multipart request" }, 400);

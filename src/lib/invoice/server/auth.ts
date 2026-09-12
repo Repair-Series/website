@@ -31,7 +31,7 @@ export async function requireInvoiceCaller(req: NextRequest): Promise<InvoiceAcc
 
   let uid = "";
   try {
-    const decoded = await getAdminAuth().verifyIdToken(token);
+    const decoded = await (await getAdminAuth()).verifyIdToken(token);
     uid = String(decoded.uid || "");
   } catch {
     throw Object.assign(new Error("Invalid or expired session"), { status: 401 });

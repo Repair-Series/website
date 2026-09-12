@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       return jsonWithCors(req, { error: "Sign in required" }, { status: 401 });
     }
 
-    const adminAuth = getAdminAuth();
+    const adminAuth = await getAdminAuth();
     let decoded: { uid: string; phone_number?: string; name?: string };
     try {
       decoded = await adminAuth.verifyIdToken(token);

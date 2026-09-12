@@ -84,7 +84,7 @@ async function sendFcm(
   payload: PushPayload,
 ): Promise<{ sent: number; invalid: string[] }> {
   if (!tokens.length || !hasServiceAccount()) return { sent: 0, invalid: [] };
-  const messaging = getAdminMessaging();
+  const messaging = await getAdminMessaging();
   const stringData: Record<string, string> = {};
   for (const [k, v] of Object.entries(payload.data || {})) {
     if (v == null) continue;

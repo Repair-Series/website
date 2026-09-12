@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: [
     "firebase-admin",
+    "jose",
+    "jwks-rsa",
     "pdfkit",
     "qrcode",
     "form-data",

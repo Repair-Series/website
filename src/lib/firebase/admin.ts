@@ -1,7 +1,7 @@
 import { App, cert, getApps, initializeApp } from "firebase-admin/app";
-import { Auth, getAuth } from "firebase-admin/auth";
-import { Firestore, getFirestore } from "firebase-admin/firestore";
-import { Messaging, getMessaging } from "firebase-admin/messaging";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import type { Auth } from "firebase-admin/auth";
+import type { Messaging } from "firebase-admin/messaging";
 
 function parseServiceAccount(): Record<string, unknown> | null {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -50,13 +50,15 @@ export function getAdminDb(): Firestore {
   return getFirestore();
 }
 
-export function getAdminAuth(): Auth {
+export async function getAdminAuth(): Promise<Auth> {
   getAdminApp();
+  const { getAuth } = await import("firebase-admin/auth");
   return getAuth();
 }
 
-export function getAdminMessaging(): Messaging {
+export async function getAdminMessaging(): Promise<Messaging> {
   getAdminApp();
+  const { getMessaging } = await import("firebase-admin/messaging");
   return getMessaging();
 }
 

@@ -1,11 +1,7 @@
 import { NextRequest } from "next/server";
 import { jsonWithCors } from "@/lib/api/cors";
-import { requireApiCaller } from "@/lib/server/auth";
 import { publicErrorMessage } from "@/lib/server/http";
-import { isCloudinaryConfigured, uploadImageToCloudinary } from "@/lib/storage/cloudinary";
 import { IMAGE_STORAGE_PROVIDER, buildPublicImageKey, shouldOverwriteCloudinary } from "@/lib/storage/keys";
-import { authorizeUpload, metaFromForm } from "@/lib/storage/kinds";
-import { optimizeImageBuffer } from "@/lib/storage/optimize-image";
 import { MAX_OPTIMIZED_IMAGE_BYTES, validateImageBuffer } from "@/lib/storage/validate";
 
 type FileLike = {
@@ -52,6 +48,9 @@ export async function handleUploadPost(req: NextRequest) {
     console.info("[Storage Upload] Method:", req.method);
     console.info("[Storage Upload] Content-Type:", req.headers.get("content-type") || "(none)");
 
+    const { isCloudinaryConfigured, uploadImageToCloudinary } = await import(
+      "@/lib/storage/cloudinary"
+    );
     if (!isCloudinaryConfigured()) {
       throw Object.assign(new Error("Cloudinary is not configured on the server"), {
         status: 503,
@@ -79,8 +78,10 @@ export async function handleUploadPost(req: NextRequest) {
     console.info("[Storage Upload] File received:", fileOk);
     console.info("[Storage Upload] Kind received:", kindRaw || "(empty)");
 
+    const { requireApiCaller } = await import("@/lib/server/auth");
+    const { authorizeUpload, metaFromForm } = await import("@/lib/storage/kinds");
     const caller = await requireApiCaller(req);
-    console.info("[Storage Upload] Authentication result", { role: caller.role });
+    console.info("[Storage] authentication status", { ok: true, role: caller.role });
 
     if (!kindRaw) {
       return json(req, { error: "Missing kind" }, 400);
@@ -110,6 +111,7 @@ export async function handleUploadPost(req: NextRequest) {
       return json(req, { error: "Missing file" }, 400);
     }
     const { contentType: sniffedType } = validateImageBuffer(buffer, file.type);
+    const { optimizeImageBuffer } = await import("@/lib/storage/optimize-image");
     const optimized = await optimizeImageBuffer(buffer, sniffedType);
     if (optimized.buffer.length > MAX_OPTIMIZED_IMAGE_BYTES) {
       return json(req, { error: "Image is still too large after compression" }, 413);

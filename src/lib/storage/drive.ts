@@ -1,6 +1,17 @@
 import { Readable } from "node:stream";
-import { google, type drive_v3 } from "googleapis";
 import { safeId } from "./keys";
+
+type DriveClient = {
+  files: {
+    list: (opts: Record<string, unknown>) => Promise<{ data: { files?: Array<{ id?: string | null }> } }>;
+    create: (opts: Record<string, unknown>) => Promise<{ data: { id?: string | null } }>;
+    update: (opts: Record<string, unknown>) => Promise<{ data: { id?: string | null } }>;
+    get: (
+      opts: Record<string, unknown>,
+      extra?: Record<string, unknown>,
+    ) => Promise<{ data: ArrayBuffer | Buffer | string }>;
+  };
+};
 
 type ServiceAccount = {
   client_email?: string;
@@ -48,10 +59,10 @@ export function isGoogleDriveConfigured(): boolean {
   }
 }
 
-let cachedDrive: drive_v3.Drive | null = null;
+let cachedDrive: DriveClient | null = null;
 const folderCache = new Map<string, string>();
 
-function getDrive(): drive_v3.Drive {
+async function getDrive(): Promise<DriveClient> {
   if (cachedDrive) return cachedDrive;
   const credentials = readServiceAccount();
   if (!credentials.client_email || !credentials.private_key) {
@@ -59,17 +70,18 @@ function getDrive(): drive_v3.Drive {
       status: 503,
     });
   }
+  const { google } = await import("googleapis");
   const auth = new google.auth.JWT({
     email: credentials.client_email,
     key: credentials.private_key.replace(/\\n/g, "\n"),
     scopes: ["https://www.googleapis.com/auth/drive"],
   });
-  cachedDrive = google.drive({ version: "v3", auth });
+  cachedDrive = google.drive({ version: "v3", auth }) as unknown as DriveClient;
   return cachedDrive;
 }
 
 async function findChildFolder(parentId: string, name: string): Promise<string | null> {
-  const drive = getDrive();
+  const drive = await getDrive();
   const safeName = name.replace(/'/g, "\\'");
   const result = await drive.files.list({
     q: `'${parentId}' in parents and name = '${safeName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -90,7 +102,7 @@ async function findOrCreateFolder(parentId: string, name: string): Promise<strin
     folderCache.set(cacheKey, existing);
     return existing;
   }
-  const drive = getDrive();
+  const drive = await getDrive();
   const created = await drive.files.create({
     requestBody: {
       name,
@@ -107,7 +119,7 @@ async function findOrCreateFolder(parentId: string, name: string): Promise<strin
 }
 
 async function findFileInFolder(parentId: string, fileName: string): Promise<string | null> {
-  const drive = getDrive();
+  const drive = await getDrive();
   const safeName = fileName.replace(/'/g, "\\'");
   const result = await drive.files.list({
     q: `'${parentId}' in parents and name = '${safeName}' and trashed = false`,
@@ -133,7 +145,7 @@ export async function uploadInvoicePdfToDrive(options: {
   bytes: number;
 }> {
   const fileName = safeId(options.fileName.replace(/\.pdf$/i, ""), "invoice") + ".pdf";
-  const drive = getDrive();
+  const drive = await getDrive();
   const invoicesRoot = invoicesRootFolderId();
   const yearFolder = await findOrCreateFolder(invoicesRoot, String(options.year));
   const monthFolder = await findOrCreateFolder(yearFolder, String(options.month));
@@ -183,7 +195,7 @@ export async function uploadInvoicePdfToDrive(options: {
 export async function downloadDriveFile(fileId: string): Promise<Buffer> {
   const id = String(fileId || "").trim();
   if (!id) throw new Error("Missing Google Drive file id");
-  const drive = getDrive();
+  const drive = await getDrive();
   const result = await drive.files.get(
     {
       fileId: id,

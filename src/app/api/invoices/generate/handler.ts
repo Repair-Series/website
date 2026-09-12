@@ -45,9 +45,20 @@ export async function handleGeneratePost(req: NextRequest) {
   }
 
   console.info("[Invoice API] Invoice generation started", { bookingId });
-  const { generateAndStoreInvoice, invoiceSecretsFromEnv } = await import(
-    "@/lib/invoice/server"
-  );
+  let generateAndStoreInvoice: typeof import("@/lib/invoice/server").generateAndStoreInvoice;
+  let invoiceSecretsFromEnv: typeof import("@/lib/invoice/server").invoiceSecretsFromEnv;
+  try {
+    ({ generateAndStoreInvoice, invoiceSecretsFromEnv } = await import(
+      "@/lib/invoice/server"
+    ));
+  } catch (err) {
+    throw Object.assign(
+      new Error(
+        `Invoice generator failed to load: ${String((err as Error)?.message || err)}`,
+      ),
+      { status: 503 },
+    );
+  }
   const result = await generateAndStoreInvoice(db, {
     bookingId,
     booking,

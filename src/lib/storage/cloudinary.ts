@@ -37,6 +37,10 @@ function fileExtension(contentType: string): string {
   return "jpg";
 }
 
+function formBody(form: NodeFormData): Uint8Array {
+  return new Uint8Array(form.getBuffer());
+}
+
 export function isCloudinaryConfigured(): boolean {
   try {
     requireCloudName();
@@ -106,7 +110,7 @@ export async function uploadImageToCloudinary(options: {
     {
       method: "POST",
       headers: form.getHeaders(),
-      body: form.getBuffer(),
+      body: formBody(form),
     },
   );
   const payload = (await response.json().catch(() => ({}))) as {
@@ -159,7 +163,7 @@ export async function destroyCloudinaryImage(publicId: string): Promise<void> {
     {
       method: "POST",
       headers: form.getHeaders(),
-      body: form.getBuffer(),
+      body: formBody(form),
     },
   );
   if (!response.ok) {

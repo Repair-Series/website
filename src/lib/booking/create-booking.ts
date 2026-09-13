@@ -91,8 +91,15 @@ export async function createCustomerBooking(
     preferredTechnicianId?: string;
   },
 ): Promise<{ bookingId: string; status: string; technicianId: string | null }> {
-  const { customerId, customerName, customerPhone, customerEmail, service, draft } =
-    params;
+  const liveUser = getAuthClient()?.currentUser;
+  if (!liveUser) {
+    throw Object.assign(new Error("Sign in required"), { status: 401 });
+  }
+  if (params.customerId && params.customerId !== liveUser.uid) {
+    throw Object.assign(new Error("Not allowed"), { status: 403 });
+  }
+  const customerId = liveUser.uid;
+  const { customerName, customerPhone, customerEmail, service, draft } = params;
   const revisitFrom = String(params.revisitFromBookingId || "").trim();
   let revisitTechnicianId = String(params.preferredTechnicianId || "").trim();
   let parentServicePolicy: Record<string, unknown> | undefined;
@@ -410,9 +417,9 @@ export async function createCustomerBooking(
       /* best effort */
     }
     const err = e as Error & { code?: string };
-    if (err.code === "NO_TECH_IN_RADIUS") {
+    if (err.code === "NO_TECH_IN_RADIUS" || err.code === "NO_ELIGIBLE_PARTNER") {
       throw new Error(
-        "No service partner is available within range for this address. Try another location or contact support.",
+        "No available partner for this slot. Please select another time.",
       );
     }
     if (err.code === "ALL_TECHS_BUSY" || err.code === "PAST_SLOT") {

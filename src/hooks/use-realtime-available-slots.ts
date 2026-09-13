@@ -8,7 +8,7 @@ import {
   type BusySlotEntry,
   type SlotVisibilityDebug,
 } from "@/lib/booking/slot-allocation";
-import { getServiceCategoryId, loadGeneralSettings, loadTechnicians } from "@/lib/booking/slot-availability";
+import { getServiceCategoryId, loadTechnicians } from "@/lib/booking/slot-availability";
 import type { ServiceDoc } from "@/lib/booking/types";
 import { getDb } from "@/lib/firebase/firestore";
 
@@ -19,9 +19,8 @@ function logSlotDebug(debug: SlotVisibilityDebug) {
   console.info("[slots]", {
     date: debug.dateKey,
     category: debug.categoryId,
-    radiusKm: debug.radiusKm,
     categoryMatch: debug.categoryMatchCount,
-    inRadius: debug.eligibleCount,
+    eligiblePartners: debug.eligibleCount,
     hiddenPast: debug.pastFiltered,
     hiddenAllBusy: debug.fullyBusy,
     visible: debug.visibleCount,
@@ -63,7 +62,6 @@ export function useRealtimeAvailableSlots(params: {
     const unsubs: Array<() => void> = [];
 
     let allTechnicians: Awaited<ReturnType<typeof loadTechnicians>> = [];
-    let radiusKm = 25;
     let busyByTech: Record<string, BusySlotEntry[]> = {};
     const categoryId = getServiceCategoryId(service);
 
@@ -74,7 +72,7 @@ export function useRealtimeAvailableSlots(params: {
         userLat: lat,
         userLng: lng,
         dateKey: dateKey.trim(),
-        radiusKm,
+        radiusKm: 0,
         allTechnicians,
         busyByTech,
       });
@@ -85,15 +83,13 @@ export function useRealtimeAvailableSlots(params: {
         if (!categoryId) {
           setEmptyReason("Service category is missing.");
         } else if (debug.categoryMatchCount === 0) {
-          setEmptyReason("No technicians match this service category in your area.");
+          setEmptyReason("No available partner for this slot. Please select another time.");
         } else if (debug.eligibleCount === 0) {
-          setEmptyReason(
-            `No technicians within ${radiusKm} km of your address. Try updating your location.`,
-          );
+          setEmptyReason("No available partner for this slot. Please select another time.");
         } else if (debug.pastFiltered >= 10) {
           setEmptyReason("All slots for today have passed. Please pick another date.");
         } else {
-          setEmptyReason("All slots are booked for this date. Try another day.");
+          setEmptyReason("No available partner for this slot. Please select another time.");
         }
       } else {
         setEmptyReason(null);
@@ -104,11 +100,6 @@ export function useRealtimeAvailableSlots(params: {
 
     (async () => {
       try {
-        const settings = await loadGeneralSettings(db);
-        radiusKm =
-          Number(settings.defaultTechnicianServiceRadiusKm) > 0
-            ? Number(settings.defaultTechnicianServiceRadiusKm)
-            : 25;
         allTechnicians = await loadTechnicians(db);
         if (cancelled) return;
 
@@ -132,7 +123,7 @@ export function useRealtimeAvailableSlots(params: {
 
         if (categoryTechs.length === 0) {
           setAvailableSlots([]);
-          setEmptyReason("No technicians match this service category in your area.");
+          setEmptyReason("No available partner for this slot. Please select another time.");
           setLoading(false);
           return;
         }

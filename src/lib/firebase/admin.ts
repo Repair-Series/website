@@ -6,15 +6,20 @@ import type { Messaging } from "firebase-admin/messaging";
 function parseServiceAccount(): Record<string, unknown> | null {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!raw || !String(raw).trim()) return null;
+  let parsed: Record<string, unknown> | null = null;
   try {
-    return JSON.parse(raw);
+    parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch {
     try {
-      return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
+      parsed = JSON.parse(Buffer.from(raw, "base64").toString("utf8")) as Record<string, unknown>;
     } catch {
       return null;
     }
   }
+  if (parsed?.private_key) {
+    parsed.private_key = String(parsed.private_key).replace(/\\n/g, "\n");
+  }
+  return parsed;
 }
 
 function getAdminApp(): App {
@@ -46,8 +51,7 @@ function getAdminApp(): App {
 }
 
 export function getAdminDb(): Firestore {
-  getAdminApp();
-  return getFirestore();
+  return getFirestore(getAdminApp());
 }
 
 export async function getAdminAuth(): Promise<Auth> {

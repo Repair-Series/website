@@ -1,10 +1,13 @@
 import { NextRequest } from "next/server";
-import { getAdminDb } from "@/lib/firebase/admin";
 import { apiOptions, jsonWithCors, publicErrorMessage } from "@/lib/server/http";
 import { requireApiCaller } from "@/lib/server/auth";
 import { calculateTransactionFinance, resolveFinancialSettings } from "@/lib/server/finance";
-import { resolveCatalogServicePrice } from "@/lib/server/finance/catalogPrice";
-import { loadServerCoupon } from "@/lib/server/finance/loadCoupon";
+import { resolveCatalogServicePriceFromData } from "@/lib/server/finance/catalogPrice";
+import { evaluateCouponData } from "@/lib/server/finance/loadCoupon";
+import {
+  getDocumentWithUserToken,
+  queryFirstByCodeWithUserToken,
+} from "@/lib/server/userFirestore";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -36,23 +39,33 @@ export async function POST(req: NextRequest) {
       spareParts?: Array<{ title?: string; quantity?: number; rate?: number; amount?: number }>;
     };
 
-    const db = getAdminDb();
-    const [generalSnap, invoiceSnap] = await Promise.all([
-      db.doc("settings/general").get(),
-      db.doc("settings/invoice").get(),
+    const header = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+    const idToken = /^Bearer\s+(.+)$/i.exec(header.trim())?.[1]?.trim() || "";
+    if (!idToken) {
+      throw Object.assign(new Error("Sign in required"), { status: 401, code: "UNAUTHENTICATED" });
+    }
+
+    console.info("[Checkout] loading catalog with user token", {
+      uid: caller.uid,
+      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "repair-series",
+    });
+    const [general, invoice] = await Promise.all([
+      getDocumentWithUserToken(idToken, "settings/general"),
+      getDocumentWithUserToken(idToken, "settings/invoice"),
     ]);
-    const general = (generalSnap.data() || {}) as Record<string, unknown>;
-    const invoice = (invoiceSnap.data() || {}) as Record<string, unknown>;
-    const settings = resolveFinancialSettings(general, invoice, {
+    const settings = resolveFinancialSettings(general || {}, invoice || {}, {
       financeFormulaVersion: "v2",
     });
 
     let serviceAmount = 0;
-    let catalog: Awaited<ReturnType<typeof resolveCatalogServicePrice>> | null = null;
+    let catalog: ReturnType<typeof resolveCatalogServicePriceFromData> | null = null;
     const serviceId = String(body.serviceId || "").trim();
     if (serviceId) {
-      catalog = await resolveCatalogServicePrice(db, {
-        serviceId,
+      const serviceDoc = await getDocumentWithUserToken(idToken, `services/${serviceId}`);
+      if (!serviceDoc) {
+        throw Object.assign(new Error("Service not found"), { status: 404 });
+      }
+      catalog = resolveCatalogServicePriceFromData(serviceId, serviceDoc, {
         variationId: String(body.variationId || "").trim(),
         quantity: body.quantity,
       });
@@ -77,7 +90,10 @@ export async function POST(req: NextRequest) {
           ? Math.round(((serviceAmount * settings.customerPlatformFeeValue) / 100) * 100) / 100
           : settings.customerPlatformFeeValue;
       const checkoutSubtotal = serviceAmount + feeAmount;
-      coupon = await loadServerCoupon(couponCode, checkoutSubtotal);
+      const couponDoc =
+        (await queryFirstByCodeWithUserToken(idToken, "coupons", couponCode.toUpperCase())) ||
+        (await queryFirstByCodeWithUserToken(idToken, "offers", couponCode.toUpperCase()));
+      coupon = evaluateCouponData(couponCode.toUpperCase(), couponDoc, checkoutSubtotal);
       if (!coupon.valid) {
         return jsonWithCors(req, { ok: false, error: coupon.message, coupon }, { status: 400 });
       }
@@ -176,8 +192,21 @@ export async function POST(req: NextRequest) {
       snapshot: snap,
     });
   } catch (err) {
-    const status = Number((err as { status?: number })?.status || 500);
-    const message = publicErrorMessage(err, "Could not calculate checkout");
+    const raw = String((err as Error)?.message || "");
+    const adminAuthFailure = /16\s*UNAUTHENTICATED|OAuth 2 access token|invalid authentication credentials/i.test(
+      raw,
+    );
+    const status = adminAuthFailure
+      ? 503
+      : Number((err as { status?: number })?.status || 500);
+    const message = adminAuthFailure
+      ? "Server authentication is not configured"
+      : publicErrorMessage(err, "Could not calculate checkout");
+    console.info("[Checkout] failed", {
+      status,
+      code: String((err as { code?: string }).code || ""),
+      message: message.slice(0, 160),
+    });
     if (status >= 500) console.error("api/checkout/calculate", message);
     return jsonWithCors(req, { error: message }, { status });
   }

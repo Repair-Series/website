@@ -14,6 +14,7 @@ import {
   type AddressForm,
 } from "@/lib/booking/address";
 import { createCustomerBooking } from "@/lib/booking/create-booking";
+import { getAuthClient } from "@/lib/firebase/auth";
 import {
   clearBookingDraft,
   loadBookingDraft,
@@ -387,7 +388,14 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
   };
 
   const onConfirm = async (customerName: string, customerPhone: string) => {
-    if (!db || !service || !user) return;
+    const liveUser = getAuthClient()?.currentUser;
+    if (!db || !service || !user || !liveUser || liveUser.uid !== user.uid) {
+      persistDraft();
+      const returnUrl = `/book/${serviceIdOrSlug}`;
+      setAuthReturnUrl(returnUrl);
+      router.push(`/auth?return=${encodeURIComponent(returnUrl)}`);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {

@@ -83,30 +83,73 @@ export function fetchTechniciansMatchingCategory(
   );
 }
 
-/** Matches User App `filterWithinRadiusKm`. */
+function normalizeVerificationStatus(data: Record<string, unknown>): string {
+  const alt = data.verificationStatus ?? data.accountStatus;
+  if (alt != null && String(alt).trim() !== "") {
+    return String(alt).trim().toLowerCase();
+  }
+  const st = String(data.status ?? "").trim().toLowerCase();
+  if (st === "pending" || st === "active" || st === "rejected") return st;
+  return "active";
+}
+
+/** Matches `isTechnicianAssignable` + `isTechnicianShiftAvailable`. */
+function isPartnerAssignable(tech: TechnicianDoc): boolean {
+  const data = tech as unknown as Record<string, unknown>;
+  if (!tech || data.suspended === true) return false;
+  const shift = data.shiftStatus;
+  if (shift === "Busy" || shift === "Offline") return false;
+  const legacy = data.status;
+  if (legacy === "Busy" || legacy === "Offline") return false;
+  const kycStatus = String(
+    (data.kyc as { status?: string } | undefined)?.status ?? "",
+  ).toLowerCase();
+  const accountStatus = normalizeVerificationStatus(data);
+  if (
+    (accountStatus === "active" || accountStatus === "") &&
+    (!kycStatus || kycStatus === "approved")
+  ) {
+    return true;
+  }
+  if (!accountStatus && !kycStatus) return true;
+  return accountStatus === "active";
+}
+
+/** Rank eligible partners by distance. There is no km cap. */
+export function rankPartnersByDistance(
+  technicians: TechnicianDoc[],
+  userLat: number,
+  userLng: number,
+): TechnicianDoc[] {
+  const ulat = Number(userLat);
+  const ulng = Number(userLng);
+  if (!Number.isFinite(ulat) || !Number.isFinite(ulng)) return [];
+
+  return technicians
+    .filter((tech) => isPartnerAssignable(tech))
+    .map((tech) => {
+      const { lat, lng } = getTechnicianLatLng(
+        tech as unknown as Record<string, unknown>,
+      );
+      if (lat == null || lng == null) return null;
+      return {
+        tech,
+        distanceKm: haversineDistanceKm(ulat, ulng, lat, lng),
+      };
+    })
+    .filter((row): row is { tech: TechnicianDoc; distanceKm: number } => row !== null)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map((row) => row.tech);
+}
+
+/** @deprecated Use rankPartnersByDistance. radiusKm is ignored. */
 export function filterWithinRadiusKm(
   technicians: TechnicianDoc[],
   userLat: number,
   userLng: number,
-  radiusKm: number,
+  _radiusKm?: number,
 ): TechnicianDoc[] {
-  const ulat = Number(userLat);
-  const ulng = Number(userLng);
-  if (!Number.isFinite(radiusKm) || radiusKm <= 0) return [];
-  if (!Number.isFinite(ulat) || !Number.isFinite(ulng)) return [];
-
-  return technicians
-    .map((t) => {
-      const { lat, lng } = getTechnicianLatLng(
-        t as unknown as Record<string, unknown>,
-      );
-      if (lat == null || lng == null) return { tech: t, distanceKm: Infinity };
-      const km = haversineDistanceKm(ulat, ulng, lat, lng);
-      return { tech: t, distanceKm: km };
-    })
-    .filter((row) => row.distanceKm <= radiusKm)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-    .map((row) => row.tech);
+  return rankPartnersByDistance(technicians, userLat, userLng);
 }
 
 function isSlotBusyEntry(entry: BusySlotEntry | null | undefined): boolean {
@@ -158,12 +201,7 @@ export function computeVisibleSlots(params: {
     params;
 
   const categoryMatch = fetchTechniciansMatchingCategory(allTechnicians, categoryId);
-  const eligible = filterWithinRadiusKm(
-    categoryMatch,
-    userLat,
-    userLng,
-    Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 25,
-  );
+  const eligible = rankPartnersByDistance(categoryMatch, userLat, userLng);
   const ids = eligible.map((t) => t.id);
 
   const debug: SlotVisibilityDebug = {
@@ -215,11 +253,10 @@ export function isSlotStillAvailable(params: {
   if (isPastDateKey(params.dateStr) || isSlotPastForDate(params.dateStr, idx)) {
     return false;
   }
-  const eligible = filterWithinRadiusKm(
+  const eligible = rankPartnersByDistance(
     fetchTechniciansMatchingCategory(params.allTechnicians, params.categoryId),
     params.userLat,
     params.userLng,
-    params.radiusKm > 0 ? params.radiusKm : 25,
   );
   if (!eligible.length) return false;
 

@@ -1,4 +1,8 @@
 import { compressImageFile } from "./compress-image";
+import {
+  isDirectCloudinaryConfigured,
+  uploadFileToCloudinary,
+} from "./cloudinary-direct";
 
 export type UploadKind =
   | "profile-user"
@@ -19,7 +23,7 @@ export type UploadKind =
 
 export type UploadImageOptions = {
   kind: UploadKind;
-  token: string;
+  token?: string;
   serviceName?: string;
   serviceId?: string;
   slot?: string;
@@ -37,74 +41,39 @@ export type UploadImageOptions = {
 export type UploadedMedia = {
   url: string;
   fileKey: string;
+  publicId: string;
+  resourceType: string;
   storageProvider: string;
   contentType: string;
 };
-
-function websiteOrigin(): string {
-  const raw =
-    typeof window !== "undefined" && window.location?.origin
-      ? window.location.origin
-      : String(process.env.NEXT_PUBLIC_SITE_URL || "");
-  return raw.trim().replace(/\/$/, "").replace(/\/api$/i, "");
-}
 
 export async function uploadImage(
   file: File | Blob,
   options: UploadImageOptions,
 ): Promise<UploadedMedia> {
-  if (!options.token) throw new Error("Sign in required");
+  if (!isDirectCloudinaryConfigured()) {
+    throw new Error(
+      "Set NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME and NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET.",
+    );
+  }
   const prepared = await compressImageFile(file);
-  const form = new FormData();
-  form.append("file", prepared);
-  form.append("kind", options.kind);
-  const extras: Array<[string, string | undefined]> = [
-    ["serviceName", options.serviceName],
-    ["serviceId", options.serviceId],
-    ["slot", options.slot],
-    ["section", options.section],
-    ["bannerId", options.bannerId],
-    ["offerId", options.offerId],
-    ["sectionId", options.sectionId],
-    ["bookingId", options.bookingId],
-    ["ownerId", options.ownerId],
-    ["side", options.side],
-    ["categoryName", options.categoryName],
-    ["categoryId", options.categoryId],
-  ];
-  for (const [key, value] of extras) {
-    if (value) form.append(key, value);
-  }
-
-  const response = await fetch(`${websiteOrigin()}/api/storage/upload`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${options.token}` },
-    body: form,
-  });
-  const payload = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    url?: string;
-    fileKey?: string;
-    storageProvider?: string;
-    contentType?: string;
-  };
-  if (!response.ok) {
-    throw new Error(payload.error || "Image upload failed");
-  }
-  const url = String(payload.url || "").trim();
-  if (!url) throw new Error("Upload succeeded but no image URL was returned");
+  const fileName =
+    prepared instanceof File ? prepared.name : `${options.kind || "image"}.webp`;
+  const uploaded = await uploadFileToCloudinary(prepared, fileName);
   return {
-    url,
-    fileKey: String(payload.fileKey || ""),
-    storageProvider: String(payload.storageProvider || "cloudinary"),
-    contentType: String(payload.contentType || prepared.type || "image/webp"),
+    url: uploaded.url,
+    fileKey: uploaded.publicId,
+    publicId: uploaded.publicId,
+    resourceType: uploaded.resourceType,
+    storageProvider: "cloudinary",
+    contentType: prepared.type || "image/webp",
   };
 }
 
 /** Backward-compatible name used by the profile page. */
 export async function uploadImageToCloudinary(
   file: File | Blob,
-  options: Omit<UploadImageOptions, "kind"> & { kind?: UploadKind },
+  options: Omit<UploadImageOptions, "kind"> & { kind?: UploadKind } = {},
 ): Promise<string> {
   const uploaded = await uploadImage(file, {
     ...options,

@@ -17,19 +17,11 @@ function isActiveVariation(raw: Record<string, unknown>): boolean {
  * Authoritative catalog price. Never trust a client-sent serviceAmount
  * when a serviceId is present.
  */
-export async function resolveCatalogServicePrice(
-  db: Firestore,
-  input: { serviceId?: string; variationId?: string; quantity?: unknown },
-): Promise<{ serviceId: string; serviceName: string; unitPrice: number; quantity: number; amount: number }> {
-  const serviceId = String(input.serviceId || "").trim();
-  if (!serviceId) {
-    throw Object.assign(new Error("serviceId is required"), { status: 400 });
-  }
-  const snap = await db.doc(`services/${serviceId}`).get();
-  if (!snap.exists) {
-    throw Object.assign(new Error("Service not found"), { status: 404 });
-  }
-  const data = (snap.data() || {}) as Record<string, unknown>;
+export function resolveCatalogServicePriceFromData(
+  serviceId: string,
+  data: Record<string, unknown>,
+  input: { variationId?: string; quantity?: unknown },
+): { serviceId: string; serviceName: string; unitPrice: number; quantity: number; amount: number } {
   const serviceName = String(data.name || data.title || "Service").trim();
   const variationId = String(input.variationId || "").trim();
   let unitPrice = 0;
@@ -65,4 +57,20 @@ export async function resolveCatalogServicePrice(
     quantity,
     amount: Math.round(unitPrice * quantity * 100) / 100,
   };
+}
+
+export async function resolveCatalogServicePrice(
+  db: Firestore,
+  input: { serviceId?: string; variationId?: string; quantity?: unknown },
+): Promise<{ serviceId: string; serviceName: string; unitPrice: number; quantity: number; amount: number }> {
+  const serviceId = String(input.serviceId || "").trim();
+  if (!serviceId) {
+    throw Object.assign(new Error("serviceId is required"), { status: 400 });
+  }
+  const snap = await db.doc(`services/${serviceId}`).get();
+  if (!snap.exists) {
+    throw Object.assign(new Error("Service not found"), { status: 404 });
+  }
+  const data = (snap.data() || {}) as Record<string, unknown>;
+  return resolveCatalogServicePriceFromData(serviceId, data, input);
 }

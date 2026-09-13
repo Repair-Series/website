@@ -11,6 +11,7 @@ import {
   assignNearestTechnicianAndLockBusySlot,
   releaseBusySlotForBooking,
 } from "@/lib/booking/allocation";
+import { getAuthClient } from "@/lib/firebase/auth";
 import { isPastDateKey, isSlotPast, resolveBookingSlot } from "@/lib/booking/slots";
 import { slotLabelFromIndex } from "@/lib/booking/technician-slots";
 import { getServiceCategoryId } from "@/lib/booking/slot-availability";
@@ -39,9 +40,16 @@ export async function rescheduleBooking(
     slotIndex?: number;
   },
 ): Promise<void> {
+  const liveUser = getAuthClient()?.currentUser;
+  if (!liveUser) {
+    throw Object.assign(new Error("Sign in required"), { status: 401 });
+  }
   const bookingId = String(params.bookingId || "").trim();
-  const customerId = String(params.customerId || "").trim();
-  if (!bookingId || !customerId) throw new Error("Missing booking or customer.");
+  const customerId = liveUser.uid;
+  if (params.customerId && params.customerId !== customerId) {
+    throw Object.assign(new Error("Not allowed"), { status: 403 });
+  }
+  if (!bookingId) throw new Error("Missing booking or customer.");
 
   const slot = resolveBookingSlot(params.slotId, params.slotIndex);
   if (!slot) throw new Error("Invalid time slot selected.");
@@ -144,9 +152,9 @@ export async function rescheduleBooking(
         "This slot is no longer available. Please select another slot.",
       );
     }
-    if (err.code === "NO_TECH_IN_RADIUS") {
+    if (err.code === "NO_TECH_IN_RADIUS" || err.code === "NO_ELIGIBLE_PARTNER") {
       throw new Error(
-        "No service partner is available for this slot. Try another time.",
+        "No available partner for this slot. Please select another time.",
       );
     }
     throw e;

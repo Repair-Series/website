@@ -98,39 +98,55 @@ export function technicianMatchesServiceCategory(
   return arr.some((id) => String(id).trim() === target);
 }
 
-export function technicianWithinBookingRadius(
-  technician: TechnicianDoc,
-  bookingLatLng: { lat: number | null; lng: number | null },
-  platformKm: number,
-): boolean {
-  const { lat: tLat, lng: tLng } = getTechnicianLatLng(
+export function technicianHasValidLocation(technician: TechnicianDoc): boolean {
+  const { lat, lng } = getTechnicianLatLng(
     technician as unknown as Record<string, unknown>,
   );
-  if (tLat == null || tLng == null) return false;
-  const defaultR = Number(platformKm) > 0 ? Number(platformKm) : 10;
-  const techR =
-    Number(technician.serviceRadius) > 0
-      ? Number(technician.serviceRadius)
-      : defaultR;
-  const maxKm = Math.min(techR, defaultR);
-  const { lat: bLat, lng: bLng } = bookingLatLng;
-  if (bLat == null || bLng == null) return true;
-  return haversineDistanceKm(tLat, tLng, bLat, bLng) <= maxKm;
+  return lat != null && lng != null;
+}
+
+/** Location is required for ranking. Distance is never a hard cutoff. */
+export function technicianWithinBookingRadius(
+  technician: TechnicianDoc,
+  _bookingLatLng?: { lat: number | null; lng: number | null },
+  _platformKm?: number,
+): boolean {
+  return technicianHasValidLocation(technician);
 }
 
 export function getEligibleTechnicians(
   technicians: TechnicianDoc[],
   service: ServiceDoc,
   bookingLatLng: { lat: number; lng: number },
-  platformKm: number,
+  _platformKm?: number,
 ): TechnicianDoc[] {
-  return technicians.filter(
-    (t) =>
-      isTechnicianAssignable(t) &&
-      isTechnicianShiftAvailable(t) &&
-      technicianMatchesServiceCategory(t, service) &&
-      technicianWithinBookingRadius(t, bookingLatLng, platformKm),
-  );
+  const ulat = Number(bookingLatLng.lat);
+  const ulng = Number(bookingLatLng.lng);
+  return technicians
+    .filter(
+      (t) =>
+        isTechnicianAssignable(t) &&
+        isTechnicianShiftAvailable(t) &&
+        technicianMatchesServiceCategory(t, service) &&
+        technicianHasValidLocation(t),
+    )
+    .map((tech) => {
+      const { lat, lng } = getTechnicianLatLng(
+        tech as unknown as Record<string, unknown>,
+      );
+      return {
+        tech,
+        distanceKm:
+          lat != null &&
+          lng != null &&
+          Number.isFinite(ulat) &&
+          Number.isFinite(ulng)
+            ? haversineDistanceKm(ulat, ulng, lat, lng)
+            : Number.POSITIVE_INFINITY,
+      };
+    })
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map((row) => row.tech);
 }
 
 export function getBookingSlotFromDoc(
@@ -283,11 +299,8 @@ export async function findTechnicianForSlot(
     params.platformRadiusKm,
   );
   const descriptor = descriptorForSlot(params.dateKey, params.slotIndex);
-  const sorted = [...eligible].sort((a, b) =>
-    String(a.id).localeCompare(String(b.id)),
-  );
 
-  for (const tech of sorted) {
+  for (const tech of eligible) {
     if (params.busyByTech && params.bookings) {
       if (
         !isTechnicianFreeForSlot(

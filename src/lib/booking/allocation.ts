@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { buildSlotDocId, slotLabelFromIndex } from "@/lib/booking/technician-slots";
 import {
-  filterWithinRadiusKm,
+  rankPartnersByDistance,
   fetchTechniciansMatchingCategory,
   isSlotPastForDate,
   isPastDateKey,
@@ -20,7 +20,6 @@ import {
 } from "@/lib/booking/slot-allocation";
 import {
   getServiceCategoryId,
-  loadGeneralSettings,
   loadTechnicians,
 } from "@/lib/booking/slot-availability";
 import type { ServiceDoc } from "@/lib/booking/types";
@@ -82,19 +81,12 @@ export async function isSlotStillAvailable(
   const idx = Number(params.slotIndex);
   if (isPastDateKey(dateKey) || isSlotPastForDate(dateKey, idx)) return false;
 
-  const settings = await loadGeneralSettings(db);
-  const radiusKm =
-    params.platformRadiusKm ??
-    (Number(settings.defaultTechnicianServiceRadiusKm) > 0
-      ? Number(settings.defaultTechnicianServiceRadiusKm)
-      : 25);
   const allTechnicians = await loadTechnicians(db);
   const categoryId = getServiceCategoryId(params.service);
-  const eligible = filterWithinRadiusKm(
+  const eligible = rankPartnersByDistance(
     fetchTechniciansMatchingCategory(allTechnicians, categoryId),
     params.userLat,
     params.userLng,
-    radiusKm,
   );
   if (!eligible.length) return false;
 
@@ -110,7 +102,7 @@ export async function isSlotStillAvailable(
     userLng: params.userLng,
     dateStr: dateKey,
     slotIndex: idx,
-    radiusKm,
+    radiusKm: 0,
     allTechnicians,
     busyByTech,
   });
@@ -138,22 +130,16 @@ export async function assignNearestTechnicianAndLockBusySlot(
     throw err;
   }
 
-  const settings = await loadGeneralSettings(db);
-  const radiusKm =
-    Number(settings.defaultTechnicianServiceRadiusKm) > 0
-      ? Number(settings.defaultTechnicianServiceRadiusKm)
-      : 25;
   const technicians = await loadTechnicians(db);
-  const eligible = filterWithinRadiusKm(
+  const eligible = rankPartnersByDistance(
     fetchTechniciansMatchingCategory(technicians, params.categoryId),
     params.userLat,
     params.userLng,
-    radiusKm,
   );
 
   if (!eligible.length) {
-    const err = new Error("NO_TECH_IN_RADIUS");
-    (err as Error & { code?: string }).code = "NO_TECH_IN_RADIUS";
+    const err = new Error("NO_ELIGIBLE_PARTNER");
+    (err as Error & { code?: string }).code = "NO_ELIGIBLE_PARTNER";
     throw err;
   }
 

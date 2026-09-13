@@ -16,6 +16,7 @@ import {
   type AddressForm,
 } from "@/lib/booking/address";
 import { createCustomerBooking } from "@/lib/booking/create-booking";
+import { getAuthClient } from "@/lib/firebase/auth";
 import { groupCartForCheckout } from "@/lib/cart/checkout-groups";
 import { cartSubtotal, cartTotal, cartVisitingCharge } from "@/lib/cart/storage";
 import {
@@ -182,7 +183,13 @@ export function CartCheckoutClient() {
   };
 
   const onConfirm = async () => {
-    if (!db || !user || !selectedSlot || items.length === 0) return;
+    const liveUser = getAuthClient()?.currentUser;
+    if (!db || !user || !liveUser || liveUser.uid !== user.uid || !selectedSlot || items.length === 0) {
+      if (!user || !liveUser) {
+        setError("Sign in required to confirm this booking.");
+      }
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {

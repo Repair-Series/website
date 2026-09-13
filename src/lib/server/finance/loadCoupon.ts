@@ -63,6 +63,14 @@ export async function loadServerCoupon(
     return { valid: false, message: "Could not verify promo code. Try again." };
   }
 
+  return evaluateCouponData(code, data, orderSubtotal);
+}
+
+export function evaluateCouponData(
+  code: string,
+  data: Record<string, unknown> | null,
+  orderSubtotal = 0,
+): ServerCoupon {
   if (!data) return { valid: false, message: "Invalid promo code." };
   if (data.active === false) return { valid: false, message: "This promo code is inactive." };
   if (isExpired(data.expiresAt ?? data.expiryDate)) {

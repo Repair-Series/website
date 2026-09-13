@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import {
+  getDocumentWithUserToken,
+  verifyIdTokenWithApiKey,
+} from "@/lib/server/userFirestore";
 
 export type CallerRole = "customer" | "technician" | "admin" | "internal";
 
@@ -34,35 +38,100 @@ export function tryInternalAuth(req: NextRequest): ApiCaller | null {
   return null;
 }
 
+function adminCredentialFailure(err: unknown): boolean {
+  const message = String((err as Error)?.message || "");
+  const code = String(
+    (err as { code?: string }).code ||
+      (err as { errorInfo?: { code?: string } }).errorInfo?.code ||
+      "",
+  );
+  return (
+    /16\s*UNAUTHENTICATED|OAuth 2 access token|invalid authentication credentials|ERR_REQUIRE_ESM|jwks-rsa|Failed to load external module/i.test(
+      message,
+    ) || /app-deleted|invalid-credential/i.test(code)
+  );
+}
+
 export async function requireApiCaller(req: NextRequest): Promise<ApiCaller> {
+  const header = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  const token = bearerToken(req);
+  console.info("[API Auth] header present", Boolean(header));
+  console.info("[API Auth] bearer format valid", Boolean(token));
+
   const internal = tryInternalAuth(req);
   if (internal) return internal;
 
-  const token = bearerToken(req);
   if (!token) {
-    throw Object.assign(new Error("Sign in required"), { status: 401 });
+    throw Object.assign(new Error("Sign in required"), { status: 401, code: "UNAUTHENTICATED" });
   }
 
   let uid = "";
   try {
     const decoded = await (await getAdminAuth()).verifyIdToken(token);
     uid = String(decoded.uid || "");
-  } catch {
-    throw Object.assign(new Error("Invalid or expired session"), { status: 401 });
+    console.info("[API Auth] decoded uid", uid || "(empty)");
+    console.info(
+      "[API Auth] firebase project id",
+      String(decoded.aud || process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || ""),
+    );
+  } catch (err) {
+    const code = String(
+      (err as { code?: string }).code ||
+        (err as { errorInfo?: { code?: string } }).errorInfo?.code ||
+        "",
+    );
+    console.info("[API Auth] verification error", {
+      code: code || "(none)",
+      message: String((err as Error)?.message || "").slice(0, 180),
+    });
+    if (adminCredentialFailure(err)) {
+      const fallback = await verifyIdTokenWithApiKey(token);
+      uid = fallback.uid;
+      console.info("[API Auth] verified via Identity Toolkit fallback", { uid });
+    } else {
+      throw Object.assign(new Error("Invalid or expired session"), {
+        status: 401,
+        code: "UNAUTHENTICATED",
+      });
+    }
   }
   if (!uid) {
-    throw Object.assign(new Error("Sign in required"), { status: 401 });
+    throw Object.assign(new Error("Sign in required"), { status: 401, code: "UNAUTHENTICATED" });
   }
 
-  const db = getAdminDb();
-  const adminSnap = await db.doc(`adminUsers/${uid}`).get();
-  if (adminSnap.exists && String(adminSnap.data()?.status ?? "") === "active") {
-    return { uid, role: "admin" };
-  }
-
-  const techSnap = await db.doc(`technicians/${uid}`).get();
-  if (techSnap.exists) {
-    return { uid, role: "technician" };
+  try {
+    const db = getAdminDb();
+    const adminSnap = await db.doc(`adminUsers/${uid}`).get();
+    if (adminSnap.exists && String(adminSnap.data()?.status ?? "") === "active") {
+      return { uid, role: "admin" };
+    }
+    const techSnap = await db.doc(`technicians/${uid}`).get();
+    if (techSnap.exists) {
+      return { uid, role: "technician" };
+    }
+  } catch (err) {
+    if (adminCredentialFailure(err)) {
+      console.info("[API Auth] Admin Firestore unavailable; resolving role with user token", {
+        uid,
+        message: String((err as Error)?.message || "").slice(0, 160),
+      });
+      try {
+        const adminDoc = await getDocumentWithUserToken(token, `adminUsers/${uid}`);
+        if (adminDoc && String(adminDoc.status ?? "") === "active") {
+          return { uid, role: "admin" };
+        }
+      } catch {
+        /* customer cannot read adminUsers */
+      }
+      try {
+        const techDoc = await getDocumentWithUserToken(token, `technicians/${uid}`);
+        if (techDoc) return { uid, role: "technician" };
+      } catch {
+        /* not a technician */
+      }
+      return { uid, role: "customer" };
+    }
+    throw err;
   }
 
   return { uid, role: "customer" };

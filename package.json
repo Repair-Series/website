@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/server/finance/finance.test.ts src/lib/peak-hours/group-slots.test.ts src/lib/catalog/category-video.test.ts src/lib/auth/phone.test.ts src/lib/storage/keys.test.ts src/lib/storage/validate.test.ts src/lib/notifications/outbox.test.ts src/lib/booking/slot-allocation.test.ts"
+    "test": "tsx --test src/lib/server/finance/finance.test.ts src/lib/peak-hours/group-slots.test.ts src/lib/catalog/category-video.test.ts src/lib/auth/phone.test.ts src/lib/storage/keys.test.ts src/lib/storage/validate.test.ts src/lib/notifications/outbox.test.ts src/lib/booking/slot-allocation.test.ts src/lib/booking/client-assign.test.ts src/lib/firebase/admin.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -18,7 +18,6 @@
     "firebase": "^12.14.0",
     "firebase-admin": "^14.2.0",
     "form-data": "^4.0.6",
-    "googleapis": "^164.1.0",
     "lucide-react": "^1.17.0",
     "next": "16.2.7",
     "pdfkit": "^0.19.1",

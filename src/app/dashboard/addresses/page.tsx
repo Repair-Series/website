@@ -141,7 +141,7 @@ export default function AddressesPage() {
     }
   };
 
-  const useCurrentLocation = async () => {
+  const fetchCurrentLocation = async () => {
     if (!navigator.geolocation) {
       setError("Geolocation is not supported on this device.");
       return;
@@ -249,7 +249,7 @@ export default function AddressesPage() {
 
           <button
             type="button"
-            onClick={() => void useCurrentLocation()}
+            onClick={() => void fetchCurrentLocation()}
             disabled={locating}
             className="inline-flex h-11 items-center gap-2 rounded-full border border-[#C45508]/40 px-4 text-sm font-bold text-[#C45508]"
           >

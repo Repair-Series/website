@@ -77,9 +77,6 @@ export async function rescheduleBooking(
   const addr = (data.address || {}) as { lat?: number; lng?: number };
   const userLat = Number(addr.lat);
   const userLng = Number(addr.lng);
-  if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
-    throw new Error("Booking address is missing coordinates.");
-  }
 
   const scheduledAtDate = scheduledAtFromLocalSlot(params.dateKey, slot.startHour);
   if (Number.isNaN(scheduledAtDate.getTime())) {
@@ -97,7 +94,8 @@ export async function rescheduleBooking(
     scheduledSlotLabel: slotLabel,
     scheduledSlotIndex: slot.slotIndex,
     scheduleDateKey: params.dateKey,
-    scheduleSlotIndex: slot.slotIndex,
+    scheduleSlotIndex: Math.max(0, slot.slotIndex - 1),
+    slotStartHour: slot.startHour,
     date: params.dateKey,
     time: slotLabel,
     slot: slotLabel,
@@ -108,24 +106,23 @@ export async function rescheduleBooking(
 
   try {
     if (previousTechId && status === "Assigned") {
-      await assignExistingTechnicianAndLockBusySlot(db, {
-        bookingId,
-        technicianId: previousTechId,
-        dateStr: params.dateKey,
-        slotLabel,
-        slotIndex: slot.slotIndex,
-      });
-      return;
+      try {
+        await assignExistingTechnicianAndLockBusySlot(db, {
+          bookingId,
+          technicianId: previousTechId,
+          dateStr: params.dateKey,
+          slotIndex: slot.slotIndex,
+          slotLabel,
+        });
+        return;
+      } catch (e) {
+        const err = e as Error & { code?: string };
+        if (err.code !== "ALL_TECHS_BUSY") throw e;
+      }
     }
 
     const serviceId = String(data.serviceId || "").trim();
     if (!serviceId) {
-      await updateDoc(ref, {
-        status: "New",
-        technicianId: "",
-        technicianName: "",
-        updatedAt: serverTimestamp(),
-      });
       return;
     }
 
@@ -142,8 +139,8 @@ export async function rescheduleBooking(
       userLat,
       userLng,
       dateStr: params.dateKey,
-      slotLabel,
       slotIndex: slot.slotIndex,
+      slotLabel,
     });
   } catch (e) {
     const err = e as Error & { code?: string };
@@ -152,10 +149,11 @@ export async function rescheduleBooking(
         "This slot is no longer available. Please select another slot.",
       );
     }
-    if (err.code === "NO_TECH_IN_RADIUS" || err.code === "NO_ELIGIBLE_PARTNER") {
-      throw new Error(
-        "No available partner for this slot. Please select another time.",
-      );
+    if (err.code === "ASSIGN_PERMISSION_DENIED" || err.code === "permission-denied") {
+      throw new Error("Booking assignment permission denied");
+    }
+    if (err.code === "NO_ELIGIBLE_PARTNER") {
+      throw new Error("No partner is currently available for this slot.");
     }
     throw e;
   }

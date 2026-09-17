@@ -1,5 +1,5 @@
 export const IMAGE_STORAGE_PROVIDER = "cloudinary" as const;
-export const DOCUMENT_STORAGE_PROVIDER = "google-drive" as const;
+export const DOCUMENT_STORAGE_PROVIDER = "cloudinary" as const;
 /** @deprecated Use IMAGE_STORAGE_PROVIDER. Kept so older callers compile. */
 export const STORAGE_PROVIDER = IMAGE_STORAGE_PROVIDER;
 
@@ -113,11 +113,11 @@ export function shouldOverwriteCloudinary(kind: string): boolean {
   return kind === "profile-user" || kind === "profile-partner" || kind === "company";
 }
 
-export function buildInvoiceDrivePath(input: {
+export function buildInvoiceStoragePath(input: {
   invoiceNumber?: string;
   bookingId?: string;
   now?: Date;
-}): { year: string; month: string; fileName: string } {
+}): { folder: string; publicId: string; fileName: string } {
   const now = input.now || new Date();
   const year = String(now.getFullYear());
   const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -125,18 +125,21 @@ export function buildInvoiceDrivePath(input: {
     input.invoiceNumber || input.bookingId,
     `INV-${year}${month}-${safeId(input.bookingId, "booking")}`,
   );
-  return { year, month, fileName: `${invoice}.pdf` };
+  return {
+    folder: `${ROOT}/invoices/${year}/${month}`,
+    publicId: invoice.replace(/\.pdf$/i, ""),
+    fileName: `${invoice.replace(/\.pdf$/i, "")}.pdf`,
+  };
 }
 
-/** @deprecated Invoice PDFs are stored on Google Drive, not object-storage keys. */
 export function buildInvoiceKey(input: {
   customerId?: string;
   invoiceNumber?: string;
   bookingId?: string;
   now?: Date;
 }): string {
-  const path = buildInvoiceDrivePath(input);
-  return `invoices/${path.year}/${path.month}/${path.fileName}`;
+  const path = buildInvoiceStoragePath(input);
+  return `${path.folder}/${path.fileName}`;
 }
 
 export function isInvoiceKey(key: string): boolean {

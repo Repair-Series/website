@@ -18,7 +18,6 @@ const nextConfig: NextConfig = {
     "pdfkit",
     "qrcode",
     "form-data",
-    "googleapis",
     "sharp",
   ],
   images: {

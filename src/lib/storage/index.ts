@@ -2,7 +2,7 @@ export {
   IMAGE_STORAGE_PROVIDER,
   DOCUMENT_STORAGE_PROVIDER,
   STORAGE_PROVIDER,
-  buildInvoiceDrivePath,
+  buildInvoiceStoragePath,
   buildInvoiceKey,
   buildPublicImageKey,
   invoiceAccessUrl,
@@ -17,6 +17,7 @@ export {
   destroyCloudinaryImage,
   isCloudinaryConfigured,
   uploadImageToCloudinary,
+  uploadPdfToCloudinary,
   cloudinaryPublicIdFromUrl,
 } from "./cloudinary";
 export { authorizeUpload, metaFromForm, parseUploadKind } from "./kinds";

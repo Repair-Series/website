@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  buildInvoiceDrivePath,
   buildInvoiceKey,
+  buildInvoiceStoragePath,
   buildPublicImageKey,
   isCloudinaryUrl,
   slugifyName,
@@ -75,16 +75,16 @@ describe("buildPublicImageKey", () => {
   });
 });
 
-describe("buildInvoiceDrivePath", () => {
+describe("buildInvoiceStoragePath", () => {
   it("groups invoices by year and month using the invoice number", () => {
-    const path = buildInvoiceDrivePath({
+    const path = buildInvoiceStoragePath({
       invoiceNumber: "INV-20260905-abc",
       bookingId: "abc",
       now: new Date(2026, 8, 5, 10, 0, 0),
     });
     assert.deepEqual(path, {
-      year: "2026",
-      month: "09",
+      folder: "repair-series/invoices/2026/09",
+      publicId: "INV-20260905-abc",
       fileName: "INV-20260905-abc.pdf",
     });
   });
@@ -98,7 +98,7 @@ describe("buildInvoiceKey", () => {
       bookingId: "abc",
       now: new Date(2026, 8, 5, 10, 0, 0),
     });
-    assert.equal(key, "invoices/2026/09/INV-20260905-abc.pdf");
+    assert.equal(key, "repair-series/invoices/2026/09/INV-20260905-abc.pdf");
   });
 });
 

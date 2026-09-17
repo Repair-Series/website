@@ -54,8 +54,8 @@ export function getTechnicianLatLng(technician: Record<string, unknown> | null |
   const loc = technician.location;
   if (loc && typeof loc === "object" && !Array.isArray(loc)) {
     const o = loc as Record<string, unknown>;
-    const latRaw = o.lat ?? o.latitude;
-    const lngRaw = o.lng ?? o.longitude;
+    const latRaw = o.lat ?? o.latitude ?? o._latitude;
+    const lngRaw = o.lng ?? o.longitude ?? o._longitude;
     const lat = latRaw != null && latRaw !== "" ? Number(latRaw) : null;
     const lng = lngRaw != null && lngRaw !== "" ? Number(lngRaw) : null;
     if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {

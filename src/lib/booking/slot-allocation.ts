@@ -56,6 +56,24 @@ export function getBusySlotDocumentId(dateStr: string, slotIndex: number): strin
   return `${dateStr}_${Number(slotIndex)}`;
 }
 
+function categoryIdsFromUnknown(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" || typeof item === "number") {
+      const s = String(item).trim();
+      if (s) ids.push(s);
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const rec = item as Record<string, unknown>;
+      const s = String(rec.id ?? rec.categoryId ?? "").trim();
+      if (s) ids.push(s);
+    }
+  }
+  return ids;
+}
+
 /** Matches User App `techMatchesCategory`. */
 export function techMatchesCategory(
   data: Record<string, unknown>,
@@ -67,8 +85,10 @@ export function techMatchesCategory(
   if (single && single === c) return true;
   const primary = String(data.primaryCategoryId ?? "").trim();
   if (primary && primary === c) return true;
-  const arr = Array.isArray(data.categoryIds) ? data.categoryIds : null;
-  if (arr && arr.some((x) => String(x).trim() === c)) return true;
+  const fromIds = categoryIdsFromUnknown(data.categoryIds);
+  if (fromIds.some((x) => x === c)) return true;
+  const fromCats = categoryIdsFromUnknown(data.categories);
+  if (fromCats.some((x) => x === c)) return true;
   return false;
 }
 
@@ -89,33 +109,41 @@ function normalizeVerificationStatus(data: Record<string, unknown>): string {
     return String(alt).trim().toLowerCase();
   }
   const st = String(data.status ?? "").trim().toLowerCase();
-  if (st === "pending" || st === "active" || st === "rejected") return st;
-  return "active";
+  if (st === "pending" || st === "active" || st === "rejected" || st === "inactive") {
+    return st;
+  }
+  // Shift values such as Available/Busy/Offline must not be treated as account lifecycle.
+  return "";
 }
 
-/** Matches `isTechnicianAssignable` + `isTechnicianShiftAvailable`. */
-function isPartnerAssignable(tech: TechnicianDoc): boolean {
+function isBlockedAccountLifecycle(status: string): boolean {
+  return (
+    status === "rejected" ||
+    status === "pending" ||
+    status === "inactive" ||
+    status === "suspended"
+  );
+}
+
+/**
+ * Approval/KYC only. Slot freedom comes from busySlots, not shiftStatus.
+ * Admin approve writes verificationStatus: "approved" and accountStatus: "active".
+ */
+export function isPartnerAssignable(tech: TechnicianDoc | Record<string, unknown>): boolean {
   const data = tech as unknown as Record<string, unknown>;
   if (!tech || data.suspended === true) return false;
-  const shift = data.shiftStatus;
-  if (shift === "Busy" || shift === "Offline") return false;
-  const legacy = data.status;
-  if (legacy === "Busy" || legacy === "Offline") return false;
   const kycStatus = String(
     (data.kyc as { status?: string } | undefined)?.status ?? "",
-  ).toLowerCase();
+  )
+    .trim()
+    .toLowerCase();
+  if (kycStatus && kycStatus !== "approved") return false;
   const accountStatus = normalizeVerificationStatus(data);
-  if (
-    (accountStatus === "active" || accountStatus === "") &&
-    (!kycStatus || kycStatus === "approved")
-  ) {
-    return true;
-  }
-  if (!accountStatus && !kycStatus) return true;
-  return accountStatus === "active";
+  if (isBlockedAccountLifecycle(accountStatus)) return false;
+  return true;
 }
 
-/** Rank eligible partners by distance. There is no km cap. */
+/** Rank eligible partners by distance. There is no km cap. Missing coords never hide a partner. */
 export function rankPartnersByDistance(
   technicians: TechnicianDoc[],
   userLat: number,
@@ -123,7 +151,7 @@ export function rankPartnersByDistance(
 ): TechnicianDoc[] {
   const ulat = Number(userLat);
   const ulng = Number(userLng);
-  if (!Number.isFinite(ulat) || !Number.isFinite(ulng)) return [];
+  const canRank = Number.isFinite(ulat) && Number.isFinite(ulng);
 
   return technicians
     .filter((tech) => isPartnerAssignable(tech))
@@ -131,13 +159,15 @@ export function rankPartnersByDistance(
       const { lat, lng } = getTechnicianLatLng(
         tech as unknown as Record<string, unknown>,
       );
-      if (lat == null || lng == null) return null;
+      const hasLoc = lat != null && lng != null;
       return {
         tech,
-        distanceKm: haversineDistanceKm(ulat, ulng, lat, lng),
+        distanceKm:
+          canRank && hasLoc
+            ? haversineDistanceKm(ulat, ulng, lat, lng)
+            : Number.POSITIVE_INFINITY,
       };
     })
-    .filter((row): row is { tech: TechnicianDoc; distanceKm: number } => row !== null)
     .sort((a, b) => a.distanceKm - b.distanceKm)
     .map((row) => row.tech);
 }

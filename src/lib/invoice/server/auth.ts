@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { adminCredentialFailure } from "@/lib/server/auth";
+import { verifyIdTokenWithApiKey } from "@/lib/server/userFirestore";
 
 export type InvoiceAccess = {
   uid: string;
@@ -33,8 +35,12 @@ export async function requireInvoiceCaller(req: NextRequest): Promise<InvoiceAcc
   try {
     const decoded = await (await getAdminAuth()).verifyIdToken(token);
     uid = String(decoded.uid || "");
-  } catch {
-    throw Object.assign(new Error("Invalid or expired session"), { status: 401 });
+  } catch (err) {
+    if (!adminCredentialFailure(err)) {
+      throw Object.assign(new Error("Invalid or expired session"), { status: 401 });
+    }
+    const fallback = await verifyIdTokenWithApiKey(token);
+    uid = fallback.uid;
   }
   if (!uid) {
     throw Object.assign(new Error("Sign in required"), { status: 401 });

@@ -7,7 +7,6 @@ import {
 import { invoiceDocId } from "@/lib/server/finance";
 import { apiCorsHeaders, jsonWithCors } from "@/lib/api/cors";
 import { isCloudinaryUrl } from "@/lib/storage/keys";
-import { downloadInvoicePdfFromRecord } from "@/lib/storage/invoicePdf";
 
 export async function handleInvoiceFileGet(req: NextRequest) {
   const access = await requireInvoiceCaller(req);
@@ -31,21 +30,6 @@ export async function handleInvoiceFileGet(req: NextRequest) {
   const invoice = invoiceSnap.exists
     ? ((invoiceSnap.data() || {}) as Record<string, unknown>)
     : {};
-
-  const pdfBuffer = await downloadInvoicePdfFromRecord(invoice);
-  if (pdfBuffer) {
-    const fileName = String(invoice.fileName || `invoice-${bookingId}.pdf`);
-    const bytes = new Uint8Array(pdfBuffer);
-    return new NextResponse(bytes, {
-      status: 200,
-      headers: {
-        ...apiCorsHeaders(req),
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
-        "Cache-Control": "private, no-store",
-      },
-    });
-  }
 
   const storedUrl = String(
     invoice.pdfUrl || invoice.invoicePdfUrl || booking.invoicePdfUrl || "",

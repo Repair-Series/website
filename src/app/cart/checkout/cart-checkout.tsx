@@ -18,7 +18,7 @@ import {
 import { createCustomerBooking } from "@/lib/booking/create-booking";
 import { getAuthClient } from "@/lib/firebase/auth";
 import { groupCartForCheckout } from "@/lib/cart/checkout-groups";
-import { cartSubtotal, cartTotal, cartVisitingCharge } from "@/lib/cart/storage";
+import { cartSubtotal } from "@/lib/cart/storage";
 import {
   formatDateKeyLabel,
   getDateOptions,
@@ -57,13 +57,11 @@ export function CartCheckoutClient() {
   const [error, setError] = useState<string | null>(null);
 
   const subtotal = useMemo(() => cartSubtotal(items), [items]);
-  const visiting = useMemo(() => cartVisitingCharge(items), [items]);
-  const orderSubtotal = subtotal + visiting;
+  const orderSubtotal = subtotal;
   const discountAmount = useMemo(
     () => calculateDiscount(orderSubtotal, appliedCoupon),
     [orderSubtotal, appliedCoupon],
   );
-  const total = Math.max(0, cartTotal(items) - discountAmount);
 
   const groups = useMemo(
     () => groupCartForCheckout(items, technicians),
@@ -106,7 +104,7 @@ export function CartCheckoutClient() {
     };
   }, [db, items]);
 
-  const useCurrentLocation = async () => {
+  const fetchCurrentLocation = async () => {
     if (!navigator.geolocation) {
       setError("Geolocation is not supported.");
       return;
@@ -326,7 +324,7 @@ export function CartCheckoutClient() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => void useCurrentLocation()}
+                  onClick={() => void fetchCurrentLocation()}
                   disabled={locating}
                   className="inline-flex h-11 items-center gap-2 rounded-full border border-[#C45508]/40 px-4 text-sm font-bold text-[#C45508]"
                 >
@@ -483,13 +481,13 @@ export function CartCheckoutClient() {
               ) : null}
               <dl className="space-y-2 border-t pt-3 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-[#64748b]">Subtotal</dt>
+                  <dt className="text-[#64748b]">Service</dt>
                   <dd>₹{subtotal.toLocaleString("en-IN")}</dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-[#64748b]">Visiting</dt>
-                  <dd>₹{visiting.toLocaleString("en-IN")}</dd>
-                </div>
+                <p className="text-xs text-[#64748b]">
+                  Convenience &amp; platform fee and GST (if Admin enabled) are calculated
+                  from live settings when each booking is confirmed.
+                </p>
                 {discountAmount > 0 ? (
                   <div className="flex justify-between text-green-700">
                     <dt>Discount</dt>
@@ -497,8 +495,8 @@ export function CartCheckoutClient() {
                   </div>
                 ) : null}
                 <div className="flex justify-between text-base font-bold">
-                  <dt>Total</dt>
-                  <dd className="text-[#C45508]">₹{total.toLocaleString("en-IN")}</dd>
+                  <dt>Total (before live fees)</dt>
+                  <dd className="text-[#C45508]">₹{subtotal.toLocaleString("en-IN")}</dd>
                 </div>
               </dl>
               <div className="flex gap-2">

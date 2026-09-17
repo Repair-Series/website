@@ -42,16 +42,7 @@ export function useRealtimeAvailableSlots(params: {
   const [emptyReason, setEmptyReason] = useState<string | null>(null);
 
   useEffect(() => {
-    if (
-      !enabled ||
-      !db ||
-      !service ||
-      !dateKey?.trim() ||
-      lat == null ||
-      lng == null ||
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lng)
-    ) {
+    if (!enabled || !db || !service || !dateKey?.trim()) {
       setAvailableSlots([]);
       setLoading(false);
       setEmptyReason(null);
@@ -69,8 +60,8 @@ export function useRealtimeAvailableSlots(params: {
       if (cancelled) return;
       const { slots, debug } = computeVisibleSlots({
         categoryId,
-        userLat: lat,
-        userLng: lng,
+        userLat: Number(lat),
+        userLng: Number(lng),
         dateKey: dateKey.trim(),
         radiusKm: 0,
         allTechnicians,
@@ -82,14 +73,10 @@ export function useRealtimeAvailableSlots(params: {
       if (slots.length === 0) {
         if (!categoryId) {
           setEmptyReason("Service category is missing.");
-        } else if (debug.categoryMatchCount === 0) {
-          setEmptyReason("No available partner for this slot. Please select another time.");
-        } else if (debug.eligibleCount === 0) {
-          setEmptyReason("No available partner for this slot. Please select another time.");
         } else if (debug.pastFiltered >= 10) {
           setEmptyReason("All slots for today have passed. Please pick another date.");
         } else {
-          setEmptyReason("No available partner for this slot. Please select another time.");
+          setEmptyReason("No partner is currently available for this slot.");
         }
       } else {
         setEmptyReason(null);
@@ -123,7 +110,7 @@ export function useRealtimeAvailableSlots(params: {
 
         if (categoryTechs.length === 0) {
           setAvailableSlots([]);
-          setEmptyReason("No available partner for this slot. Please select another time.");
+          setEmptyReason("No partner is currently available for this slot.");
           setLoading(false);
           return;
         }

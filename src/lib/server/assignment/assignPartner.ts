@@ -3,6 +3,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { assertBookingAccess, type ApiCaller } from "@/lib/server/auth";
 import {
   fetchTechniciansMatchingCategory,
+  isPartnerAssignable,
   isPastDateKey,
   isSlotPastForDate,
   rankPartnersByDistance,
@@ -49,18 +50,6 @@ function isBusy(row: Record<string, unknown> | undefined): boolean {
   return String(row?.status ?? "").toLowerCase() === "busy";
 }
 
-function isAssignable(tech: Record<string, unknown>): boolean {
-  if (tech.suspended === true) return false;
-  const kycStatus = String((tech.kyc as { status?: string } | undefined)?.status ?? "").toLowerCase();
-  const accountStatus = String(
-    tech.verificationStatus ?? tech.accountStatus ?? tech.status ?? "",
-  )
-    .trim()
-    .toLowerCase();
-  if (accountStatus === "rejected" || accountStatus === "pending") return false;
-  if (kycStatus && kycStatus !== "approved") return false;
-  return true;
-}
 
 function slotIds(dateKey: string, slotIndex: number, extra?: number[]): number[] {
   const ids = new Set<number>();
@@ -180,9 +169,6 @@ export async function assignPartner(input: AssignPartnerInput): Promise<AssignPa
     input.categoryId || booking.categoryId || booking.serviceCategoryId || "",
   ).trim();
   if (!categoryId) fail("Missing service category", 400, "INVALID_REQUEST");
-  if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
-    fail("Booking address is missing coordinates.", 400, "INVALID_REQUEST");
-  }
 
   const techSnap = await db.collection("technicians").get();
   const technicians = techSnap.docs.map((docSnap) => ({
@@ -190,13 +176,13 @@ export async function assignPartner(input: AssignPartnerInput): Promise<AssignPa
     ...(docSnap.data() as object),
   })) as TechnicianDoc[];
   const eligible = rankPartnersByDistance(
-    fetchTechniciansMatchingCategory(technicians, categoryId).filter((tech) =>
-      isAssignable(tech as unknown as Record<string, unknown>),
-    ),
+    fetchTechniciansMatchingCategory(technicians, categoryId),
     userLat,
     userLng,
   );
-  if (!eligible.length) fail("NO_ELIGIBLE_PARTNER", 422, "NO_ELIGIBLE_PARTNER");
+  if (!eligible.length) {
+    fail("No partner is currently available for this slot.", 422, "NO_ELIGIBLE_PARTNER");
+  }
 
   const prevTech = String(booking.technicianId || "").trim();
   if (prevTech) {
@@ -266,8 +252,16 @@ async function authorizeSpecificAssign(
     const parent = await db.doc(`bookings/${parentId}`).get();
     if (parent.exists && String(parent.data()?.technicianId || "") === technicianId) return;
   }
-  // Multi-service checkout: later lines reuse the partner from the first new booking.
-  if (!current && String(booking.customerId || "") === caller.uid) return;
+  // Multi-service checkout: later lines may reuse a partner already assigned to this customer.
+  if (!current && String(booking.customerId || "") === caller.uid) {
+    const other = await db
+      .collection("bookings")
+      .where("customerId", "==", caller.uid)
+      .where("technicianId", "==", technicianId)
+      .limit(1)
+      .get();
+    if (!other.empty) return;
+  }
   fail("Not allowed", 403, "FORBIDDEN");
 }
 
@@ -295,7 +289,7 @@ async function lockSpecificTechnician(params: {
     const techSnap = await tx.get(techRef);
     if (!techSnap.exists) fail("Technician profile missing.", 404, "NOT_FOUND");
     const tech = (techSnap.data() || {}) as Record<string, unknown>;
-    if (!isAssignable(tech)) fail("This technician cannot be assigned.", 409, "NOT_ASSIGNABLE");
+    if (!isPartnerAssignable(tech)) fail("This technician cannot be assigned.", 409, "NOT_ASSIGNABLE");
     technicianName = String(tech.name ?? "").trim() || "";
     const busyRefs = reserved.map((index) =>
       db.doc(`technicians/${technicianId}/busySlots/${buildSlotDocId(dateKey, index)}`),

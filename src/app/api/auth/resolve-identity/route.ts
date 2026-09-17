@@ -3,6 +3,8 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { apiOptions, jsonWithCors, publicErrorMessage } from "@/lib/server/http";
 import { parseIndiaMobile } from "@/lib/auth/phone";
 import { resolvePhoneIdentity } from "@/lib/server/phone-identity";
+import { adminCredentialFailure } from "@/lib/server/auth";
+import { verifyIdTokenWithApiKey } from "@/lib/server/userFirestore";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -19,15 +21,29 @@ export async function POST(req: NextRequest) {
       return jsonWithCors(req, { error: "Sign in required" }, { status: 401 });
     }
 
-    const adminAuth = await getAdminAuth();
-    let decoded: { uid: string; phone_number?: string; name?: string };
+    let uid = "";
+    let phoneClaim = "";
+    let displayName = "";
+
     try {
-      decoded = await adminAuth.verifyIdToken(token);
-    } catch {
+      const decoded = await (await getAdminAuth()).verifyIdToken(token);
+      uid = String(decoded.uid || "").trim();
+      phoneClaim = String(decoded.phone_number || "").trim();
+      displayName = String(decoded.name || "").trim();
+    } catch (err) {
+      if (!adminCredentialFailure(err)) {
+        return jsonWithCors(req, { error: "Invalid or expired session" }, { status: 401 });
+      }
+      const fallback = await verifyIdTokenWithApiKey(token);
+      uid = fallback.uid;
+      phoneClaim = String(fallback.phoneNumber || "").trim();
+      displayName = String(fallback.displayName || "").trim();
+    }
+
+    if (!uid) {
       return jsonWithCors(req, { error: "Invalid or expired session" }, { status: 401 });
     }
 
-    const phoneClaim = String(decoded.phone_number || "").trim();
     const parsed = parseIndiaMobile(phoneClaim);
     if (!parsed.ok) {
       return jsonWithCors(
@@ -43,16 +59,30 @@ export async function POST(req: NextRequest) {
     };
     const role = body.role === "partner" ? "partner" : "customer";
 
-    const result = await resolvePhoneIdentity({
-      db: getAdminDb(),
-      adminAuth,
-      uid: decoded.uid,
-      phoneE164: parsed.e164,
-      role,
-      displayName: body.displayName || decoded.name,
-    });
-
-    return jsonWithCors(req, { ok: true, ...result });
+    try {
+      const result = await resolvePhoneIdentity({
+        db: getAdminDb(),
+        adminAuth: await getAdminAuth(),
+        uid,
+        phoneE164: parsed.e164,
+        role,
+        displayName: body.displayName || displayName,
+      });
+      return jsonWithCors(req, { ok: true, ...result });
+    } catch (err) {
+      if (!adminCredentialFailure(err) && Number((err as { status?: number })?.status) !== 503) {
+        throw err;
+      }
+      // Token is verified. Profile merge/migration needs a working Admin SDK.
+      // Clients create/update their own customer or partner profile.
+      return jsonWithCors(req, {
+        ok: true,
+        uid,
+        created: false,
+        role,
+        ...(role === "partner" ? { noPartnerRecord: true } : {}),
+      });
+    }
   } catch (err) {
     const status = Number((err as { status?: number })?.status) || 500;
     const message = publicErrorMessage(err, "Could not complete sign in");

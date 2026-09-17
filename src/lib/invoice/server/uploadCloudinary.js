@@ -1,7 +1,6 @@
 /**
- * Legacy Cloudinary invoice upload.
- * New invoices are stored on Google Drive via src/lib/storage/drive.ts.
- * Kept so existing Cloudinary PDFs can still be understood; do not call for new files.
+ * Cloudinary invoice PDF upload (raw files). Prefer testing/src/lib/storage/cloudinary.ts
+ * on the website. This helper remains for admin Cloud Functions that still share the same flow.
  */
 const crypto = require('crypto')
 const FormData = require('form-data')

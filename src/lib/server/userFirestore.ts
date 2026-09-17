@@ -113,7 +113,12 @@ export async function queryFirstByCodeWithUserToken(
   return { id, ...decodeFields(doc.fields) };
 }
 
-export async function verifyIdTokenWithApiKey(idToken: string): Promise<{ uid: string; projectId: string }> {
+export async function verifyIdTokenWithApiKey(idToken: string): Promise<{
+  uid: string;
+  projectId: string;
+  phoneNumber?: string;
+  displayName?: string;
+}> {
   const apiKey = String(process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "").trim();
   if (!apiKey) {
     throw Object.assign(new Error("Firebase API key is not configured"), { status: 503 });
@@ -127,10 +132,11 @@ export async function verifyIdTokenWithApiKey(idToken: string): Promise<{ uid: s
     },
   );
   const json = (await res.json().catch(() => ({}))) as {
-    users?: Array<{ localId?: string }>;
+    users?: Array<{ localId?: string; phoneNumber?: string; displayName?: string }>;
     error?: { message?: string };
   };
-  const uid = String(json.users?.[0]?.localId || "").trim();
+  const user = json.users?.[0];
+  const uid = String(user?.localId || "").trim();
   if (!uid) {
     throw Object.assign(new Error("Invalid or expired session"), {
       status: 401,
@@ -138,5 +144,10 @@ export async function verifyIdTokenWithApiKey(idToken: string): Promise<{ uid: s
     });
   }
   console.info("[API Auth] identity toolkit uid", uid);
-  return { uid, projectId: projectId() };
+  return {
+    uid,
+    projectId: projectId(),
+    phoneNumber: user?.phoneNumber ? String(user.phoneNumber) : undefined,
+    displayName: user?.displayName ? String(user.displayName) : undefined,
+  };
 }

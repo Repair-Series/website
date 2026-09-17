@@ -29,10 +29,10 @@ import { getDb } from "@/lib/firebase/firestore";
 import {
   getServiceImage,
   getServiceName,
-  getVisitingCharge,
   loadService,
 } from "@/lib/services/helpers";
 import { getSelectedVariationPrice } from "@/lib/services/pricing";
+import { fetchCheckoutQuote, type CheckoutQuote } from "@/lib/checkout/quote";
 import {
   isStoredLocationFresh,
   loadStoredUserLocation,
@@ -76,6 +76,7 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
   const [appliedCoupon, setAppliedCoupon] = useState<CouponResult | null>(null);
   const [promoError, setPromoError] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
+  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
 
   const restoreDraft = useCallback(() => {
     const stored = loadBookingDraft();
@@ -289,7 +290,7 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
     }
   }, []);
 
-  const useCurrentLocation = async () => {
+  const fetchCurrentLocation = async () => {
     const stored = loadStoredUserLocation();
     if (stored && isStoredLocationFresh(stored)) {
       applyStoredLocation(stored);
@@ -424,8 +425,7 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
         discountAmount:
           !searchParams.get("revisitFrom") && appliedCoupon?.valid
             ? calculateDiscount(
-                (getSelectedVariationPrice(service, variationId) ?? 0) +
-                  getVisitingCharge(service),
+                getSelectedVariationPrice(service, variationId) ?? 0,
                 appliedCoupon,
               )
             : undefined,
@@ -449,22 +449,50 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
   }, [service, variationId]);
 
   const serviceCharge = isRevisitClaim ? 0 : displayPrice ?? 0;
-  const visitingCharge = isRevisitClaim
-    ? 0
-    : getVisitingCharge(service ?? ({} as ServiceDoc));
-  const orderSubtotal = serviceCharge + visitingCharge;
   const discountAmount = useMemo(
-    () => (isRevisitClaim ? 0 : calculateDiscount(orderSubtotal, appliedCoupon)),
-    [isRevisitClaim, orderSubtotal, appliedCoupon],
+    () =>
+      isRevisitClaim
+        ? 0
+        : Number(quote?.customer.discount ?? calculateDiscount(serviceCharge, appliedCoupon)) || 0,
+    [isRevisitClaim, serviceCharge, appliedCoupon, quote],
   );
-  const estimatedTotal = Math.max(0, orderSubtotal - discountAmount);
+  const estimatedTotal = isRevisitClaim
+    ? 0
+    : Number(quote?.customer.finalPayable ?? Math.max(0, serviceCharge - discountAmount));
+
+  useEffect(() => {
+    if (isRevisitClaim || !service?.id || !user) {
+      setQuote(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const auth = getAuthClient();
+        const token = await auth?.currentUser?.getIdToken();
+        if (!token || cancelled) return;
+        const next = await fetchCheckoutQuote({
+          token,
+          serviceId: service.id,
+          variationId,
+          couponCode: appliedCoupon?.valid ? appliedCoupon.code : undefined,
+        });
+        if (!cancelled) setQuote(next);
+      } catch {
+        if (!cancelled) setQuote(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isRevisitClaim, service?.id, variationId, user, appliedCoupon, promoCode]);
 
   const applyPromo = async () => {
     if (!db || isRevisitClaim) return;
     setPromoError("");
     setPromoLoading(true);
     try {
-      const result = await validateCoupon(db, promoCode, orderSubtotal);
+      const result = await validateCoupon(db, promoCode, serviceCharge);
       if (!result.valid) {
         setAppliedCoupon(null);
         setPromoError(result.message);
@@ -562,7 +590,7 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
-                onClick={useCurrentLocation}
+                onClick={fetchCurrentLocation}
                 disabled={locating}
                 className={[
                   "flex items-center gap-3 rounded-2xl border p-4 text-left transition-all",
@@ -738,7 +766,7 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
                 </div>
               ) : availableSlots.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-[#64748b]">
-                  {emptyReason ?? "No slots available for this date. Try another day."}
+                  {emptyReason ?? "No partner is currently available for this slot."}
                 </p>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -809,7 +837,24 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
                 }
               />
               <Row label="Service charge" value={`₹${serviceCharge}`} />
-              <Row label="Visiting charge" value={`₹${visitingCharge}`} />
+              {quote ? (
+                <>
+                  <Row
+                    label="Convenience & platform fee"
+                    value={`₹${quote.customer.platformFee}`}
+                  />
+                  {quote.settings.gstEnabled ? (
+                    <Row
+                      label={`GST (${quote.settings.gstPercent}%)`}
+                      value={`₹${quote.customer.totalTax}`}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-xs text-[#64748b]">
+                  Convenience fee and GST (if enabled by Admin) are confirmed when you are signed in.
+                </p>
+              )}
               {discountAmount > 0 ? (
                 <Row label="Promo discount" value={`-₹${discountAmount}`} />
               ) : null}
@@ -881,7 +926,7 @@ export function BookingFlow({ serviceIdOrSlug }: { serviceIdOrSlug: string }) {
             <Loader2 className="size-10 animate-spin text-[#f96316]" />
             <p className="mt-4 font-medium text-[#0a0f1c]">Creating your booking...</p>
             <p className="mt-1 text-sm text-[#64748b]">
-              Assigning a nearby technician.
+              Assigning an available partner.
             </p>
           </div>
         ) : null}

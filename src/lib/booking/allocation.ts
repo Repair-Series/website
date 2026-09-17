@@ -24,11 +24,49 @@ import {
 } from "@/lib/booking/slot-availability";
 import type { ServiceDoc } from "@/lib/booking/types";
 
+import { getAuthClient } from "@/lib/firebase/auth";
+
 const BOOKING_STATUS = {
   NEW: "New",
   ASSIGNED: "Assigned",
   CANCELLED: "Cancelled",
 } as const;
+
+export function firestoreClientErrorCode(err: unknown): string {
+  return String((err as { code?: string })?.code || "").toLowerCase();
+}
+
+export function mapBookingAssignError(err: unknown): Error & { code?: string } {
+  const code = firestoreClientErrorCode(err);
+  const message = String((err as Error)?.message || "");
+  if (code === "permission-denied") {
+    return Object.assign(new Error("Booking assignment permission denied"), {
+      code: "ASSIGN_PERMISSION_DENIED",
+    });
+  }
+  if (code === "unauthenticated") {
+    return Object.assign(new Error("Sign in required"), { code: "UNAUTHENTICATED" });
+  }
+  if (code === "not-found") {
+    return Object.assign(new Error("Booking not found"), { code: "NOT_FOUND" });
+  }
+  if ((err as { code?: string })?.code === "ALL_TECHS_BUSY" || code === "all_techs_busy") {
+    return Object.assign(new Error("ALL_TECHS_BUSY"), { code: "ALL_TECHS_BUSY" });
+  }
+  if ((err as { code?: string })?.code === "ASSIGN_PERMISSION_DENIED") {
+    return err as Error & { code?: string };
+  }
+  if (code === "failed-precondition" || code === "aborted" || code === "already-exists") {
+    return Object.assign(new Error(message || code), { code: (err as { code?: string }).code });
+  }
+  return Object.assign(new Error(message || "Could not assign a partner"), {
+    code: (err as { code?: string })?.code,
+  });
+}
+
+function logAssignAttempt(info: Record<string, unknown>) {
+  console.info("[assign]", info);
+}
 
 function isSlotBusyEntry(row: Record<string, unknown> | null | undefined): boolean {
   if (!row) return false;
@@ -146,48 +184,97 @@ export async function assignNearestTechnicianAndLockBusySlot(
   const docId = buildSlotDocId(dateKey, idx);
   const bookingRef = doc(db, "bookings", params.bookingId);
   const label = params.slotLabel?.trim() || slotLabelFromIndex(idx);
-
-  let locked = false;
-  await runTransaction(db, async (transaction) => {
-    for (const tech of eligible) {
-      const busyRef = doc(db, "technicians", tech.id, "busySlots", docId);
-      const busySnap = await transaction.get(busyRef);
-      const existing = busySnap.exists() ? busySnap.data() : null;
-      if (busySnap.exists() && isSlotBusyEntry(existing as Record<string, unknown>)) {
-        continue;
-      }
-
-      transaction.set(busyRef, {
-        date: dateKey,
-        slot: label,
-        slotIndex: idx,
-        status: "busy",
-        reason: "booking",
-        bookingId: params.bookingId,
-        createdAt: serverTimestamp(),
-      });
-
-      const phone = technicianPhoneFromData(tech as unknown as Record<string, unknown>);
-      transaction.update(bookingRef, {
-        status: BOOKING_STATUS.ASSIGNED,
-        technicianId: tech.id,
-        technicianName: String(tech.name ?? "").trim() || "",
-        ...(phone ? { technicianPhone: phone } : {}),
-        scheduledSlotDate: dateKey,
-        scheduledSlotLabel: label,
-        scheduledSlotIndex: idx,
-        updatedAt: serverTimestamp(),
-      });
-      locked = true;
-      return;
-    }
-  });
-
-  if (!locked) {
-    const err = new Error("ALL_TECHS_BUSY");
-    (err as Error & { code?: string }).code = "ALL_TECHS_BUSY";
-    throw err;
+  const uid = String(getAuthClient()?.currentUser?.uid || "").trim();
+  if (!uid) {
+    throw Object.assign(new Error("Sign in required"), { code: "UNAUTHENTICATED" });
   }
+
+  for (const tech of eligible) {
+    const busyRef = doc(db, "technicians", tech.id, "busySlots", docId);
+    logAssignAttempt({
+      bookingId: params.bookingId,
+      customerId: uid,
+      technicianId: tech.id,
+      date: dateKey,
+      slotIndex: idx,
+      busySlotPath: busyRef.path,
+      bookingPath: bookingRef.path,
+      categoryId: params.categoryId,
+    });
+    try {
+      const locked = await runTransaction(db, async (transaction) => {
+        const bookingSnap = await transaction.get(bookingRef);
+        const busySnap = await transaction.get(busyRef);
+        if (!bookingSnap.exists()) {
+          throw Object.assign(new Error("Booking not found"), { code: "NOT_FOUND" });
+        }
+        const booking = bookingSnap.data() as Record<string, unknown>;
+        if (String(booking.customerId ?? "") !== uid) {
+          throw Object.assign(new Error("Not allowed"), { code: "ASSIGN_PERMISSION_DENIED" });
+        }
+        const existing = busySnap.exists() ? busySnap.data() : null;
+        const existingBid = String(
+          (existing as { bookingId?: string } | null)?.bookingId ?? "",
+        ).trim();
+        if (
+          busySnap.exists() &&
+          isSlotBusyEntry(existing as Record<string, unknown>) &&
+          existingBid !== params.bookingId
+        ) {
+          return false;
+        }
+
+        transaction.set(busyRef, {
+          date: dateKey,
+          slot: label,
+          slotIndex: idx,
+          status: "busy",
+          reason: "booking",
+          bookingId: params.bookingId,
+          createdAt: serverTimestamp(),
+        });
+
+        const phone = technicianPhoneFromData(tech as unknown as Record<string, unknown>);
+        transaction.update(bookingRef, {
+          status: BOOKING_STATUS.ASSIGNED,
+          technicianId: tech.id,
+          technicianName: String(tech.name ?? "").trim() || "",
+          ...(phone ? { technicianPhone: phone } : {}),
+          scheduledSlotDate: dateKey,
+          scheduledSlotLabel: label,
+          scheduledSlotIndex: idx,
+          updatedAt: serverTimestamp(),
+        });
+        return true;
+      });
+      if (locked) {
+        logAssignAttempt({
+          bookingId: params.bookingId,
+          technicianId: tech.id,
+          result: "Assigned",
+        });
+        return;
+      }
+    } catch (err) {
+      const mapped = mapBookingAssignError(err);
+      logAssignAttempt({
+        bookingId: params.bookingId,
+        technicianId: tech.id,
+        date: dateKey,
+        slotIndex: idx,
+        result: "FAIL",
+        errorCode: mapped.code || firestoreClientErrorCode(err),
+        errorMessage: String(mapped.message || "").slice(0, 180),
+      });
+      if (mapped.code === "ALL_TECHS_BUSY") continue;
+      if (firestoreClientErrorCode(err) === "aborted") continue;
+      throw mapped;
+    }
+  }
+
+  const err = new Error("ALL_TECHS_BUSY");
+  (err as Error & { code?: string }).code = "ALL_TECHS_BUSY";
+  throw err;
 }
 
 export async function releaseBusySlotForBooking(
@@ -265,37 +352,77 @@ export async function assignExistingTechnicianAndLockBusySlot(
   const techRef = doc(db, "technicians", techId);
   const busyRef = doc(db, "technicians", techId, "busySlots", docId);
   const label = params.slotLabel?.trim() || slotLabelFromIndex(idx);
+  const uid = String(getAuthClient()?.currentUser?.uid || "").trim();
+  if (!uid) {
+    throw Object.assign(new Error("Sign in required"), { code: "UNAUTHENTICATED" });
+  }
 
-  await runTransaction(db, async (transaction) => {
-    const techSnap = await transaction.get(techRef);
-    if (!techSnap.exists()) throw new Error("Technician profile missing.");
-    const busySnap = await transaction.get(busyRef);
-    const existing = busySnap.exists() ? busySnap.data() : null;
-    if (busySnap.exists() && isSlotBusyEntry(existing as Record<string, unknown>)) {
-      const err = new Error("ALL_TECHS_BUSY");
-      (err as Error & { code?: string }).code = "ALL_TECHS_BUSY";
-      throw err;
-    }
-    transaction.set(busyRef, {
-      date: dateKey,
-      slot: label,
-      slotIndex: idx,
-      status: "busy",
-      reason: "booking",
-      bookingId: params.bookingId,
-      createdAt: serverTimestamp(),
-    });
-    const tech = techSnap.data() || {};
-    const phone = technicianPhoneFromData(tech as Record<string, unknown>);
-    transaction.update(bookingRef, {
-      status: BOOKING_STATUS.ASSIGNED,
-      technicianId: techId,
-      technicianName: String(tech.name ?? "").trim() || "",
-      ...(phone ? { technicianPhone: phone } : {}),
-      scheduledSlotDate: dateKey,
-      scheduledSlotLabel: label,
-      scheduledSlotIndex: idx,
-      updatedAt: serverTimestamp(),
-    });
+  logAssignAttempt({
+    bookingId: params.bookingId,
+    customerId: uid,
+    technicianId: techId,
+    date: dateKey,
+    slotIndex: idx,
+    busySlotPath: busyRef.path,
+    bookingPath: bookingRef.path,
+    mode: "specific",
   });
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      const bookingSnap = await transaction.get(bookingRef);
+      const techSnap = await transaction.get(techRef);
+      const busySnap = await transaction.get(busyRef);
+      if (!bookingSnap.exists()) {
+        throw Object.assign(new Error("Booking not found"), { code: "NOT_FOUND" });
+      }
+      const booking = bookingSnap.data() as Record<string, unknown>;
+      if (String(booking.customerId ?? "") !== uid) {
+        throw Object.assign(new Error("Not allowed"), { code: "ASSIGN_PERMISSION_DENIED" });
+      }
+      if (!techSnap.exists()) throw new Error("Technician profile missing.");
+      const existing = busySnap.exists() ? busySnap.data() : null;
+      const existingBid = String((existing as { bookingId?: string } | null)?.bookingId ?? "").trim();
+      if (
+        busySnap.exists() &&
+        isSlotBusyEntry(existing as Record<string, unknown>) &&
+        existingBid !== params.bookingId
+      ) {
+        const taken = new Error("ALL_TECHS_BUSY");
+        (taken as Error & { code?: string }).code = "ALL_TECHS_BUSY";
+        throw taken;
+      }
+      transaction.set(busyRef, {
+        date: dateKey,
+        slot: label,
+        slotIndex: idx,
+        status: "busy",
+        reason: "booking",
+        bookingId: params.bookingId,
+        createdAt: serverTimestamp(),
+      });
+      const tech = techSnap.data() || {};
+      const phone = technicianPhoneFromData(tech as Record<string, unknown>);
+      transaction.update(bookingRef, {
+        status: BOOKING_STATUS.ASSIGNED,
+        technicianId: techId,
+        technicianName: String(tech.name ?? "").trim() || "",
+        ...(phone ? { technicianPhone: phone } : {}),
+        scheduledSlotDate: dateKey,
+        scheduledSlotLabel: label,
+        scheduledSlotIndex: idx,
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (err) {
+    const mapped = mapBookingAssignError(err);
+    logAssignAttempt({
+      bookingId: params.bookingId,
+      technicianId: techId,
+      result: "FAIL",
+      errorCode: mapped.code || firestoreClientErrorCode(err),
+      errorMessage: String(mapped.message || "").slice(0, 180),
+    });
+    throw mapped;
+  }
 }

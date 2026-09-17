@@ -38,7 +38,7 @@ export function tryInternalAuth(req: NextRequest): ApiCaller | null {
   return null;
 }
 
-function adminCredentialFailure(err: unknown): boolean {
+export function adminCredentialFailure(err: unknown): boolean {
   const message = String((err as Error)?.message || "");
   const code = String(
     (err as { code?: string }).code ||
@@ -48,7 +48,8 @@ function adminCredentialFailure(err: unknown): boolean {
   return (
     /16\s*UNAUTHENTICATED|OAuth 2 access token|invalid authentication credentials|ERR_REQUIRE_ESM|jwks-rsa|Failed to load external module/i.test(
       message,
-    ) || /app-deleted|invalid-credential/i.test(code)
+    ) ||
+    /app-deleted|invalid-credential|SERVER_CONFIGURATION_ERROR/i.test(code)
   );
 }
 

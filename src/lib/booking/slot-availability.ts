@@ -16,7 +16,11 @@ import {
   isSlotPast,
   type BookingSlotDef,
 } from "@/lib/booking/slots";
-import { computeVisibleSlots } from "@/lib/booking/slot-allocation";
+import {
+  computeVisibleSlots,
+  isPartnerAssignable,
+  techMatchesCategory,
+} from "@/lib/booking/slot-allocation";
 import type { ServiceDoc, TechnicianDoc } from "@/lib/booking/types";
 import { getTechnicianLatLng, haversineDistanceKm } from "@/lib/geo";
 
@@ -52,29 +56,8 @@ export function isTechnicianShiftAvailable(technician: TechnicianDoc): boolean {
   return true;
 }
 
-export function normalizeVerificationStatus(technician: TechnicianDoc): string {
-  const alt = technician.verificationStatus ?? technician.accountStatus;
-  if (alt != null && String(alt).trim() !== "") {
-    return String(alt).trim().toLowerCase();
-  }
-  const st = String(technician.status ?? "").trim().toLowerCase();
-  if (st === "pending" || st === "active" || st === "rejected") return st;
-  return "active";
-}
-
 export function isTechnicianAssignable(technician: TechnicianDoc): boolean {
-  if (!technician || technician.suspended === true) return false;
-  const kycStatus = String(technician.kyc?.status ?? "").toLowerCase();
-  const accountStatus = normalizeVerificationStatus(technician);
-  if (
-    (accountStatus === "active" || accountStatus === "") &&
-    (!kycStatus || kycStatus === "approved")
-  ) {
-    return true;
-  }
-  if (accountStatus === "active" && kycStatus === "approved") return true;
-  if (!accountStatus && !kycStatus) return true;
-  return accountStatus === "active";
+  return isPartnerAssignable(technician);
 }
 
 export function getServiceCategoryId(service: ServiceDoc): string {
@@ -87,15 +70,10 @@ export function technicianMatchesServiceCategory(
 ): boolean {
   const categoryId = getServiceCategoryId(service ?? ({} as ServiceDoc));
   if (!categoryId) return true;
-  const target = String(categoryId).trim();
-  const single = String(technician.categoryId ?? "").trim();
-  if (single && single === target) return true;
-  const arr = Array.isArray(
-    (technician as { categoryIds?: string[] }).categoryIds,
-  )
-    ? (technician as { categoryIds?: string[] }).categoryIds!
-    : [];
-  return arr.some((id) => String(id).trim() === target);
+  return techMatchesCategory(
+    technician as unknown as Record<string, unknown>,
+    categoryId,
+  );
 }
 
 export function technicianHasValidLocation(technician: TechnicianDoc): boolean {
@@ -105,13 +83,13 @@ export function technicianHasValidLocation(technician: TechnicianDoc): boolean {
   return lat != null && lng != null;
 }
 
-/** Location is required for ranking. Distance is never a hard cutoff. */
+/** Distance is never a hard cutoff. Missing coordinates do not hide a partner. */
 export function technicianWithinBookingRadius(
-  technician: TechnicianDoc,
+  _technician: TechnicianDoc,
   _bookingLatLng?: { lat: number | null; lng: number | null },
   _platformKm?: number,
 ): boolean {
-  return technicianHasValidLocation(technician);
+  return true;
 }
 
 export function getEligibleTechnicians(
@@ -125,10 +103,7 @@ export function getEligibleTechnicians(
   return technicians
     .filter(
       (t) =>
-        isTechnicianAssignable(t) &&
-        isTechnicianShiftAvailable(t) &&
-        technicianMatchesServiceCategory(t, service) &&
-        technicianHasValidLocation(t),
+        isTechnicianAssignable(t) && technicianMatchesServiceCategory(t, service),
     )
     .map((tech) => {
       const { lat, lng } = getTechnicianLatLng(

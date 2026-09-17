@@ -39,6 +39,81 @@ export function isCloudinaryConfigured(): boolean {
   }
 }
 
+export async function uploadPdfToCloudinary(options: {
+  body: Buffer;
+  publicId: string;
+  folder?: string;
+  fileName?: string;
+}): Promise<{ publicId: string; url: string; bytes: number }> {
+  const cloudName = requireCloudName();
+  const signed = signedCredentials();
+  if (!signed) {
+    throw Object.assign(
+      new Error("Set CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET on the website server for invoice PDFs"),
+      { status: 503 },
+    );
+  }
+  const folder = String(options.folder || "").replace(/^\/+|\/+$/g, "");
+  const publicId = String(options.publicId || "")
+    .replace(/^\/+/, "")
+    .replace(/\.pdf$/i, "");
+  const shortPublicId = publicId.includes("/") ? publicId.split("/").pop() || publicId : publicId;
+  if (!shortPublicId) {
+    throw Object.assign(new Error("Missing Cloudinary public_id"), { status: 400 });
+  }
+  if (!options.body?.length) {
+    throw Object.assign(new Error("Missing PDF"), { status: 400 });
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const params: Record<string, string> = {
+    public_id: shortPublicId,
+    timestamp: String(timestamp),
+    overwrite: "true",
+  };
+  if (folder) params.folder = folder;
+
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([new Uint8Array(options.body)], { type: "application/pdf" }),
+    options.fileName || "invoice.pdf",
+  );
+  form.append("api_key", signed.apiKey);
+  form.append("timestamp", String(timestamp));
+  form.append("signature", sign(params, signed.apiSecret));
+  form.append("public_id", shortPublicId);
+  form.append("overwrite", "true");
+  if (folder) form.append("folder", folder);
+
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`, {
+    method: "POST",
+    body: form,
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    error?: { message?: string };
+    secure_url?: string;
+    url?: string;
+    public_id?: string;
+    bytes?: number;
+  };
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(payload?.error?.message || `Cloudinary PDF upload failed (${response.status})`),
+      { status: 502 },
+    );
+  }
+  const url = String(payload.secure_url || payload.url || "").trim();
+  if (!url) {
+    throw Object.assign(new Error("Cloudinary PDF upload returned no URL"), { status: 502 });
+  }
+  return {
+    publicId: String(payload.public_id || (folder ? `${folder}/${shortPublicId}` : shortPublicId)),
+    url,
+    bytes: Number(payload.bytes) || options.body.length,
+  };
+}
+
 export function cloudinaryPublicIdFromUrl(url: string): string | null {
   const trimmed = String(url || "").trim();
   if (!/res\.cloudinary\.com/i.test(trimmed)) return null;

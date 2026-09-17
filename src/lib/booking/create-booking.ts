@@ -1,7 +1,6 @@
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   serverTimestamp,
@@ -32,6 +31,7 @@ import {
 } from "@/lib/booking/saved-addresses";
 import { getAuthClient } from "@/lib/firebase/auth";
 import { fetchCheckoutQuote } from "@/lib/checkout/quote";
+import { NO_PARTNER_FOR_SLOT, SLOT_NO_LONGER_AVAILABLE } from "@/lib/booking/messages";
 import {
   getServiceName,
   getActiveVariations,
@@ -219,10 +219,6 @@ export async function createCustomerBooking(
   const promoCode = revisitFrom
     ? ""
     : String(params.promoCode || "").trim().toUpperCase();
-  const customerTotal = revisitFrom
-    ? 0
-    : Math.max(0, Number(quote?.customer.finalPayable ?? servicePrice - discountAmount));
-
   const fullAddress = buildFullAddress(draft.address);
   const durationMinutes = 60;
   const categoryId = getServiceCategoryId(service);
@@ -234,21 +230,6 @@ export async function createCustomerBooking(
   const slotLabel =
     String(draft.scheduledSlotLabel ?? "").trim() || slotLabelFromIndex(slot.slotIndex);
   const bookingCode = generateBookingCode(8);
-
-  let platformFeePercent: number | undefined;
-  let addonFeePercent: number | undefined;
-  try {
-    const generalSnap = await getDoc(doc(db, "settings", "general"));
-    if (generalSnap.exists()) {
-      const g = generalSnap.data() as Record<string, unknown>;
-      const p = Number(g.platformCommissionPercent);
-      const a = Number(g.addonFeePercent);
-      if (Number.isFinite(p) && p >= 0) platformFeePercent = p;
-      if (Number.isFinite(a) && a >= 0) addonFeePercent = a;
-    }
-  } catch {
-    /* freeze will read live settings if percents are absent */
-  }
 
   const payload: Record<string, unknown> = {
     customerId,
@@ -268,38 +249,29 @@ export async function createCustomerBooking(
       fullAddress,
     },
     scheduledAt: Timestamp.fromDate(scheduledAtDate),
+    durationMinutes,
+    amount: revisitFrom ? 0 : servicePrice,
+    visitingCharge: 0,
+    servicePrice: revisitFrom ? 0 : servicePrice,
+    ...(quote
+      ? {
+          quotedConvenienceFee: Number(quote.customer.platformFee) || 0,
+          quotedGstAmount: Number(quote.customer.totalTax) || 0,
+          quotedFinalAmount: Number(quote.customer.finalPayable) || servicePrice,
+        }
+      : {}),
     scheduledSlotDate: draft.dateKey,
     scheduledSlotLabel: slotLabel,
     scheduledSlotIndex: slot.slotIndex,
     scheduleDateKey: draft.dateKey,
-    scheduleSlotIndex: slot.slotIndex,
+    scheduleSlotIndex: Math.max(0, slot.slotIndex - 1),
+    slotStartHour: slot.startHour,
     date: draft.dateKey,
     time: slotLabel,
     slot: slotLabel,
     bookingDate: draft.dateKey,
-    durationMinutes,
-    amount: revisitFrom ? 0 : servicePrice,
-    visitingCharge: 0,
-    totalAmount: revisitFrom ? 0 : customerTotal,
-    finalBookingAmount: revisitFrom ? 0 : customerTotal,
-    servicePrice: revisitFrom ? 0 : servicePrice,
-    financeFormulaVersion: "v2",
-    ...(quote
-      ? {
-          customerPlatformFeeType: quote.settings.customerPlatformFeeType,
-          customerPlatformFeeValue: quote.settings.customerPlatformFeeValue,
-          customerPlatformFee: quote.customer.platformFee,
-          gstEnabled: quote.settings.gstEnabled,
-          gstPercent: quote.settings.gstPercent,
-          platformFeePercent: quote.settings.serviceCommissionPercent,
-          addonFeePercent: quote.settings.additionalServiceCommissionPercent,
-          sparePartCommissionPercent: quote.settings.sparePartCommissionPercent,
-        }
-      : {}),
     ...(promoCode ? { promoCode } : {}),
     ...(discountAmount > 0 ? { discountAmount } : {}),
-    ...(!quote && platformFeePercent != null ? { platformFeePercent } : {}),
-    ...(!quote && addonFeePercent != null ? { addonFeePercent } : {}),
     notes: params.notes?.trim() ?? (revisitFrom ? "Free revisit claim" : ""),
     addOnServices: [],
     status: BOOKING_STATUS.NEW,
@@ -346,8 +318,8 @@ export async function createCustomerBooking(
         bookingId,
         technicianId: revisitTechnicianId,
         dateStr: draft.dateKey,
-        slotLabel,
         slotIndex: slot.slotIndex,
+        slotLabel,
       });
       // Update parent revisit counters
       try {
@@ -406,30 +378,40 @@ export async function createCustomerBooking(
         userLat,
         userLng,
         dateStr: draft.dateKey,
-        slotLabel,
         slotIndex: slot.slotIndex,
+        slotLabel,
       });
     }
   } catch (e) {
-    try {
-      await deleteDoc(doc(db, "bookings", bookingId));
-    } catch {
-      /* best effort */
-    }
     const err = e as Error & { code?: string };
-    if (err.code === "NO_TECH_IN_RADIUS" || err.code === "NO_ELIGIBLE_PARTNER") {
-      throw new Error(
-        "No available partner for this slot. Please select another time.",
-      );
+    const slotFail =
+      err.code === "NO_ELIGIBLE_PARTNER" ||
+      err.code === "ALL_TECHS_BUSY" ||
+      err.code === "PAST_SLOT";
+    if (slotFail) {
+      try {
+        await updateDoc(doc(db, "bookings", bookingId), {
+          status: "Cancelled",
+          cancelledBy: "system",
+          cancelledAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        /* best effort */
+      }
+    }
+    if (err.code === "NO_ELIGIBLE_PARTNER") {
+      throw new Error(NO_PARTNER_FOR_SLOT);
     }
     if (err.code === "ALL_TECHS_BUSY" || err.code === "PAST_SLOT") {
-      throw new Error(
-        "This slot is no longer available. Please select another slot.",
-      );
+      throw new Error(SLOT_NO_LONGER_AVAILABLE);
+    }
+    if (err.code === "ASSIGN_PERMISSION_DENIED" || err.code === "permission-denied") {
+      throw new Error("Booking assignment permission denied");
     }
     throw new Error(
       err.message ||
-        "Could not assign a technician for this slot. Please try another time.",
+        "Could not assign a partner for this slot. Please try another time.",
     );
   }
 

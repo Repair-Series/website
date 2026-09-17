@@ -4,11 +4,11 @@ import { invoiceDocId, shouldSendInvoiceEmail } from "@/lib/server/finance";
 import { financeFromBooking } from "@/lib/server/finance";
 import {
   DOCUMENT_STORAGE_PROVIDER,
-  buildInvoiceDrivePath,
+  buildInvoiceStoragePath,
   invoiceAccessUrl,
   isCloudinaryUrl,
 } from "@/lib/storage/keys";
-import { isGoogleDriveConfigured, uploadInvoicePdfToDrive } from "@/lib/storage/drive";
+import { isCloudinaryConfigured, uploadPdfToCloudinary } from "@/lib/storage/cloudinary";
 import { downloadInvoicePdfFromRecord, hasStoredInvoiceFile } from "@/lib/storage/invoicePdf";
 import { validatePdfBuffer } from "@/lib/storage/validate";
 
@@ -24,7 +24,7 @@ const { sendInvoiceEmail } = require("./sendEmail") as {
   }) => Promise<{ skipped?: boolean; reason?: string; id?: string | null }>;
 };
 
-function emailPdfUrl(invoice: Record<string, unknown> | null | undefined): string {
+function storedCloudinaryUrl(invoice: Record<string, unknown> | null | undefined): string {
   const stored = String(invoice?.pdfUrl || invoice?.invoicePdfUrl || "").trim();
   return isCloudinaryUrl(stored) ? stored : "";
 }
@@ -35,7 +35,7 @@ async function recordInvoiceJob(
   patch: {
     status: "issued" | "failed";
     lastError?: string | null;
-    googleDriveFileId?: string | null;
+    cloudinaryPublicId?: string | null;
   },
 ) {
   const bookingRef = db.doc(`bookings/${bookingId}`);
@@ -49,7 +49,7 @@ async function recordInvoiceJob(
         status: patch.status,
         attemptCount: attempts,
         lastError: patch.status === "failed" ? String(patch.lastError || "").slice(0, 500) : null,
-        googleDriveFileId: patch.googleDriveFileId || prev.googleDriveFileId || null,
+        cloudinaryPublicId: patch.cloudinaryPublicId || prev.cloudinaryPublicId || null,
         updatedAt: FieldValue.serverTimestamp(),
       },
       updatedAt: FieldValue.serverTimestamp(),
@@ -86,16 +86,16 @@ async function generateAndStoreInvoiceInner(
   const existing = existingSnap.exists
     ? (existingSnap.data() as Record<string, unknown>)
     : null;
-  const canonicalPdfUrl = invoiceAccessUrl(bookingId);
-  const existingDriveId = String(existing?.googleDriveFileId || "").trim();
+  const accessUrl = invoiceAccessUrl(bookingId);
+  const existingPdfUrl = storedCloudinaryUrl(existing);
 
-  if (hasStoredInvoiceFile(existing) && !options.force) {
+  if (hasStoredInvoiceFile(existing) && existingPdfUrl && !options.force) {
     if (!booking.invoicePdfUrl || !booking.invoiceId) {
       await bookingRef.set(
         {
           invoiceId,
           invoiceNumber: existing?.invoiceNumber || "",
-          invoicePdfUrl: canonicalPdfUrl,
+          invoicePdfUrl: existingPdfUrl,
           invoiceStatus: existing?.status || "issued",
           invoiceCreatedAt: existing?.createdAt || FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
@@ -113,7 +113,7 @@ async function generateAndStoreInvoiceInner(
       if (pdfBuffer) {
         try {
           const sent = await sendInvoiceEmail({
-            invoice: { ...existing, pdfUrl: emailPdfUrl(existing) },
+            invoice: { ...existing, pdfUrl: existingPdfUrl },
             pdfBuffer,
             config: options.secrets?.resend || {},
           });
@@ -150,18 +150,17 @@ async function generateAndStoreInvoiceInner(
       reused: true,
       invoiceId,
       invoiceNumber: existing?.invoiceNumber || "",
-      pdfUrl: canonicalPdfUrl,
-      googleDriveFileId: existingDriveId || null,
-      fileKey: existingDriveId || null,
+      pdfUrl: existingPdfUrl,
+      fileKey: String(existing?.cloudinaryPublicId || existing?.fileKey || existing?.pdfFileKey || "") || null,
       storageProvider: existing?.storageProvider || DOCUMENT_STORAGE_PROVIDER,
-      accessUrl: canonicalPdfUrl,
+      accessUrl,
       email: emailResult,
     };
   }
 
-  if (!isGoogleDriveConfigured()) {
+  if (!isCloudinaryConfigured()) {
     throw Object.assign(
-      new Error("Google Drive is not configured for invoice storage"),
+      new Error("Cloudinary is not configured for invoice storage"),
       { status: 503 },
     );
   }
@@ -207,23 +206,22 @@ async function generateAndStoreInvoiceInner(
   const pdfBuffer = await renderInvoicePdf(invoiceData as unknown as Record<string, unknown>);
   validatePdfBuffer(pdfBuffer);
 
-  const drivePath = buildInvoiceDrivePath({
+  const storagePath = buildInvoiceStoragePath({
     invoiceNumber: invoiceData.invoiceNumber,
     bookingId,
   });
-  let uploaded: Awaited<ReturnType<typeof uploadInvoicePdfToDrive>>;
+  let uploaded: Awaited<ReturnType<typeof uploadPdfToCloudinary>>;
   try {
-    uploaded = await uploadInvoicePdfToDrive({
-      buffer: pdfBuffer,
-      fileName: drivePath.fileName,
-      year: drivePath.year,
-      month: drivePath.month,
-      overwriteFileId: existingDriveId,
+    uploaded = await uploadPdfToCloudinary({
+      body: pdfBuffer,
+      folder: storagePath.folder,
+      publicId: storagePath.publicId,
+      fileName: storagePath.fileName,
     });
   } catch (err) {
     throw Object.assign(
       new Error(
-        `Invoice PDF was generated but Google Drive upload failed: ${
+        `Invoice PDF was generated but Cloudinary upload failed: ${
           (err as Error)?.message || err
         }`,
       ),
@@ -234,6 +232,7 @@ async function generateAndStoreInvoiceInner(
   const now = FieldValue.serverTimestamp();
   const customerId = invoiceData.customerId;
   const partnerId = invoiceData.technicianId;
+  const pdfUrl = uploaded.url;
   const firestoreInvoice: Record<string, unknown> = {
     bookingId,
     bookingCode: invoiceData.bookingCode,
@@ -284,15 +283,14 @@ async function generateAndStoreInvoiceInner(
     upiId: invoiceData.upiId,
     terms: invoiceData.terms,
     thankYouMessage: invoiceData.thankYouMessage,
-    pdfUrl: canonicalPdfUrl,
-    invoicePdfUrl: canonicalPdfUrl,
-    googleDriveFileId: uploaded.fileId,
-    googleDriveFolderId: uploaded.folderId,
-    pdfFileKey: uploaded.fileId,
-    fileKey: uploaded.fileId,
+    pdfUrl,
+    invoicePdfUrl: pdfUrl,
+    pdfFileKey: uploaded.publicId,
+    fileKey: uploaded.publicId,
+    cloudinaryPublicId: uploaded.publicId,
     pdfBytes: uploaded.bytes,
-    fileName: uploaded.fileName,
-    mimeType: uploaded.mimeType,
+    fileName: storagePath.fileName,
+    mimeType: "application/pdf",
     pageCount: finance.invoicePageCount,
     generatedAt: now,
     createdAt: existing?.createdAt || now,
@@ -306,7 +304,7 @@ async function generateAndStoreInvoiceInner(
     {
       invoiceId,
       invoiceNumber: invoiceData.invoiceNumber,
-      invoicePdfUrl: canonicalPdfUrl,
+      invoicePdfUrl: pdfUrl,
       invoiceStatus: "issued",
       invoiceCreatedAt: now,
       updatedAt: now,
@@ -327,7 +325,7 @@ async function generateAndStoreInvoiceInner(
     /* invoice exists even if notify fails */
   }
 
-  const invoiceForEmail = { ...invoiceData, pdfUrl: "" };
+  const invoiceForEmail = { ...invoiceData, pdfUrl };
   let emailResult: Record<string, unknown> = { skipped: true, reason: "send_disabled" };
   if (options.sendEmail !== false && shouldSendInvoiceEmail(existing)) {
     try {
@@ -366,11 +364,10 @@ async function generateAndStoreInvoiceInner(
     reused: false,
     invoiceId,
     invoiceNumber: invoiceData.invoiceNumber,
-    pdfUrl: canonicalPdfUrl,
-    googleDriveFileId: uploaded.fileId,
-    fileKey: uploaded.fileId,
+    pdfUrl,
+    fileKey: uploaded.publicId,
     storageProvider: DOCUMENT_STORAGE_PROVIDER,
-    accessUrl: canonicalPdfUrl,
+    accessUrl,
     pageCount: finance.invoicePageCount,
     email: emailResult,
   };
@@ -394,7 +391,7 @@ export async function generateAndStoreInvoice(
     if (bookingId) {
       await recordInvoiceJob(db, bookingId, {
         status: "issued",
-        googleDriveFileId: String(result.googleDriveFileId || "") || null,
+        cloudinaryPublicId: String(result.fileKey || "") || null,
       }).catch(() => {});
     }
     return result;

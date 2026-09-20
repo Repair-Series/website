@@ -58,18 +58,27 @@ export function buildInitialBookingFinanceFields(
 }
 
 export function getCustomerTotal(booking: {
+  quotedFinalAmount?: number;
   finalBookingAmount?: number;
+  customerTotal?: number;
   totalAmount?: number;
   amount?: number;
+  servicePrice?: number;
+  customerPlatformFee?: number;
+  quotedConvenienceFee?: number;
   visitingCharge?: number;
 }): number {
-  const v =
-    booking.finalBookingAmount ?? booking.totalAmount ?? booking.amount ?? 0;
-  const base = safeMoney(v);
-  if (base > 0) return base;
-  const svc = safeMoney(booking.amount);
-  const visit = safeMoney(booking.visitingCharge);
-  return svc + visit;
+  const quoted = safeMoney(booking.quotedFinalAmount);
+  if (quoted > 0) return quoted;
+  const frozen = safeMoney(booking.finalBookingAmount ?? booking.customerTotal);
+  if (frozen > 0) return frozen;
+  const storedTotal = safeMoney(booking.totalAmount);
+  if (storedTotal > 0) return storedTotal;
+  const svc = safeMoney(booking.servicePrice ?? booking.amount);
+  const fee = safeMoney(
+    booking.customerPlatformFee ?? booking.quotedConvenienceFee ?? booking.visitingCharge,
+  );
+  return svc + fee;
 }
 
 export function getPlatformCharges(booking: {
@@ -83,14 +92,19 @@ export function getCompanyEarnings(booking: {
   companyEarnings?: number;
   platformFeeAmount?: number;
   platformCommission?: number;
+  customerPlatformFee?: number;
+  quotedConvenienceFee?: number;
   visitingCharge?: number;
   addonFeeAmount?: number;
 }): number {
   const stored = safeMoney(booking.companyEarnings);
   if (stored > 0) return stored;
+  const customerFee = safeMoney(
+    booking.customerPlatformFee ?? booking.quotedConvenienceFee ?? booking.visitingCharge,
+  );
   return (
     safeMoney(booking.platformFeeAmount ?? booking.platformCommission) +
-    safeMoney(booking.visitingCharge) +
+    customerFee +
     safeMoney(booking.addonFeeAmount)
   );
 }

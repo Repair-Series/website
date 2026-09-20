@@ -255,9 +255,18 @@ export async function createCustomerBooking(
     servicePrice: revisitFrom ? 0 : servicePrice,
     ...(quote
       ? {
-          quotedConvenienceFee: Number(quote.customer.platformFee) || 0,
-          quotedGstAmount: Number(quote.customer.totalTax) || 0,
-          quotedFinalAmount: Number(quote.customer.finalPayable) || servicePrice,
+            financeFormulaVersion: "v2",
+            quotedConvenienceFee: Number(quote.customer.platformFee) || 0,
+            quotedGstAmount: Number(quote.customer.totalTax) || 0,
+            quotedFinalAmount: Number(quote.customer.finalPayable) || servicePrice,
+            customerPlatformFeeType: quote.settings?.customerPlatformFeeType || "fixed",
+            customerPlatformFeeValue: Number(quote.settings?.customerPlatformFeeValue) || 0,
+            customerPlatformFee: Number(quote.customer.platformFee) || 0,
+            gstEnabled: quote.settings?.gstEnabled === true,
+            gstPercent: Number(quote.settings?.gstPercent) || 0,
+            platformFeePercent: Number(quote.settings?.serviceCommissionPercent) || 0,
+            addonFeePercent: Number(quote.settings?.additionalServiceCommissionPercent) || 0,
+            sparePartCommissionPercent: Number(quote.settings?.sparePartCommissionPercent) || 0,
         }
       : {}),
     scheduledSlotDate: draft.dateKey,

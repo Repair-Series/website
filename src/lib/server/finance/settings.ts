@@ -59,7 +59,10 @@ export function resolveFinancialSettings(
       frozen.customerPlatformFeeType ?? general.customerPlatformFeeType,
     ),
     customerPlatformFeeValue: nonNegativeMoney(
-      frozen.customerPlatformFeeValue ?? general.customerPlatformFeeValue,
+      frozen.customerPlatformFeeValue ??
+        frozen.customerPlatformFee ??
+        frozen.quotedConvenienceFee ??
+        general.customerPlatformFeeValue,
       0,
     ),
     gstEnabled,
@@ -90,7 +93,13 @@ export function formulaVersionFromBooking(
     .toLowerCase();
   if (explicit === "v2") return "v2";
   if (explicit === "v1" || explicit === "v1-inclusive") return "v1";
-  // Existing production bookings have no formula stamp — keep inclusive/visiting math.
+  // Frozen historical snapshots without a stamp keep visiting-charge / inclusive math.
   if (booking.economicsSnapshotAt != null) return "v1";
+  const hasCustomerPlatformFee =
+    booking.customerPlatformFee != null ||
+    booking.customerPlatformFeeValue != null ||
+    booking.quotedConvenienceFee != null ||
+    booking.quotedFinalAmount != null;
+  if (hasCustomerPlatformFee) return "v2";
   return "v1";
 }

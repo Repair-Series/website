@@ -127,6 +127,7 @@ export function calculateTransactionFinanceV2(input: FinanceInput): FinanceSnaps
   const finalPaise =
     netServicePaise + additionalPaise + sparePaise + taxableCompanyFeePaise + tax.gstPaise;
 
+  // Partner commission is a % of SERVICE VALUE only — never customer payable, fee, or GST.
   const serviceCompanyPaise = percentOfPaise(servicePaise, serviceCommissionPct);
   const additionalCompanyPaise = percentOfPaise(additionalPaise, additionalCommissionPct);
   const spareCompanyPaise = percentOfPaise(sparePaise, spareCommissionPct);

@@ -238,6 +238,7 @@ export function bookingEconomicsPatch(snap: FinanceSnapshot) {
       snap.formulaVersion === "v2"
         ? snap.serviceAmount + snap.convenienceFee
         : snap.serviceAmount + snap.visitingCharge,
+    customerTotal: snap.finalAmount,
     addedServicesAmount: snap.addedServicesAmount,
     sparePartValue: snap.sparePartValue,
     sparePartCommissionPercent: snap.sparePartCommissionPercent,

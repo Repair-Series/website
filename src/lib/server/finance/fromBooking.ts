@@ -33,17 +33,22 @@ function mapLines(items: unknown, fallbackTitle: string): SparePartLine[] {
 }
 
 export function deriveServicePrice(booking: Record<string, unknown>): number {
-  for (const k of [
-    "servicePrice",
-    "originalBookingAmount",
-    "amount",
-    "baseAmount",
-    "serviceAmount",
-  ]) {
+  for (const k of ["servicePrice", "originalBookingAmount", "serviceAmount"]) {
     const n = money(booking[k]);
     if (n > 0) return n;
   }
-  return 0;
+  const fee = money(
+    booking.customerPlatformFee ?? booking.quotedConvenienceFee ?? booking.convenienceFee,
+  );
+  const gst = money(booking.quotedGstAmount ?? booking.gstAmount);
+  const payable = money(booking.quotedFinalAmount);
+  const amount = money(booking.amount ?? booking.baseAmount);
+  if (fee > 0) {
+    const gross = payable > 0 ? payable : amount;
+    const service = money(gross - fee - gst);
+    if (service > 0) return service;
+  }
+  return amount;
 }
 
 export function deriveAddedServicesAmount(booking: Record<string, unknown>): {

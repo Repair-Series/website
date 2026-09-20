@@ -5,6 +5,9 @@ import {
   calculateCustomerCheckout,
   calculatePartnerEarning,
   calculateTransactionFinance,
+  deriveServicePrice,
+  financeFromBooking,
+  formulaVersionFromBooking,
   resolveInvoiceNumber,
   shouldSendInvoiceEmail,
   splitInclusiveGst,
@@ -386,6 +389,147 @@ describe("v2 customer + partner (authoritative new formula)", () => {
     assert.equal(snap.taxableCompanyFee, 100);
     assert.equal(snap.gstAmount, 18);
     assert.equal(snap.finalAmount, 1008);
+  });
+});
+
+describe("v2 required settlement split (commission on service only)", () => {
+  const fee149 = {
+    ...v2,
+    customerPlatformFeeType: "fixed" as const,
+    customerPlatformFeeValue: 149,
+    gstEnabled: false,
+    gstPercent: 0,
+    addonFeePercent: 0,
+  };
+
+  it("TEST 1: 1000 + 149 @ 30%", () => {
+    const snap = calculateTransactionFinance({
+      ...fee149,
+      serviceAmount: 1000,
+      platformFeePercent: 30,
+    });
+    assert.equal(snap.serviceAmount, 1000);
+    assert.equal(snap.convenienceFee, 149);
+    assert.equal(snap.finalAmount, 1149);
+    assert.equal(snap.platformFeeAmount, 300);
+    assert.equal(snap.technicianFinalEarning, 700);
+    assert.equal(snap.companyEarnings, 449);
+  });
+
+  it("TEST 2: 500 + 149 @ 30%", () => {
+    const snap = calculateTransactionFinance({
+      ...fee149,
+      serviceAmount: 500,
+      platformFeePercent: 30,
+    });
+    assert.equal(snap.finalAmount, 649);
+    assert.equal(snap.platformFeeAmount, 150);
+    assert.equal(snap.technicianFinalEarning, 350);
+    assert.equal(snap.companyEarnings, 299);
+  });
+
+  it("TEST 3: 2000 + 149 @ 30%", () => {
+    const snap = calculateTransactionFinance({
+      ...fee149,
+      serviceAmount: 2000,
+      platformFeePercent: 30,
+    });
+    assert.equal(snap.finalAmount, 2149);
+    assert.equal(snap.platformFeeAmount, 600);
+    assert.equal(snap.technicianFinalEarning, 1400);
+    assert.equal(snap.companyEarnings, 749);
+  });
+
+  it("TEST 4: 1000 + 149 @ 20%", () => {
+    const snap = calculateTransactionFinance({
+      ...fee149,
+      serviceAmount: 1000,
+      platformFeePercent: 20,
+    });
+    assert.equal(snap.finalAmount, 1149);
+    assert.equal(snap.platformFeeAmount, 200);
+    assert.equal(snap.technicianFinalEarning, 800);
+    assert.equal(snap.companyEarnings, 349);
+  });
+
+  it("TEST 5: 1000 + 149 @ 0%", () => {
+    const snap = calculateTransactionFinance({
+      ...fee149,
+      serviceAmount: 1000,
+      platformFeePercent: 0,
+    });
+    assert.equal(snap.finalAmount, 1149);
+    assert.equal(snap.platformFeeAmount, 0);
+    assert.equal(snap.technicianFinalEarning, 1000);
+    assert.equal(snap.companyEarnings, 149);
+  });
+
+  it("TEST 6: commission never uses customerTotal as its base", () => {
+    const snap = calculateTransactionFinance({
+      ...fee149,
+      serviceAmount: 1000,
+      platformFeePercent: 30,
+    });
+    assert.equal(snap.finalAmount, 1149);
+    assert.equal(snap.platformFeeAmount, 300);
+    assert.notEqual(snap.platformFeeAmount, Math.round(1149 * 0.3 * 100) / 100);
+  });
+});
+
+describe("service amount is not customer payable", () => {
+  it("strips convenience fee when only payable is stored on amount", () => {
+    assert.equal(
+      deriveServicePrice({
+        amount: 1149,
+        customerPlatformFee: 149,
+        quotedFinalAmount: 1149,
+      }),
+      1000,
+    );
+  });
+
+  it("new bookings with quoted fee use v2; frozen unstamped bookings stay v1", () => {
+    assert.equal(
+      formulaVersionFromBooking({
+        customerPlatformFee: 149,
+        quotedFinalAmount: 1149,
+      }),
+      "v2",
+    );
+    assert.equal(
+      formulaVersionFromBooking({
+        economicsSnapshotAt: { seconds: 1 },
+        amount: 1000,
+      }),
+      "v1",
+    );
+  });
+
+  it("financeFromBooking does not take 30% of customer total", () => {
+    const snap = financeFromBooking({
+      booking: {
+        amount: 1149,
+        customerPlatformFee: 149,
+        quotedConvenienceFee: 149,
+        quotedFinalAmount: 1149,
+        platformFeePercent: 30,
+        addonFeePercent: 0,
+        financeFormulaVersion: "v2",
+        gstEnabled: false,
+      },
+      settingsGeneral: {
+        platformCommissionPercent: 30,
+        addonFeePercent: 0,
+        customerPlatformFeeType: "fixed",
+        customerPlatformFeeValue: 149,
+      },
+      settingsInvoice: { gstEnabled: false, gstPercent: 0 },
+    });
+    assert.equal(snap.serviceAmount, 1000);
+    assert.equal(snap.platformFeeAmount, 300);
+    assert.equal(snap.technicianFinalEarning, 700);
+    assert.equal(snap.companyEarnings, 449);
+    assert.equal(snap.finalAmount, 1149);
   });
 });
 
